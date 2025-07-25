@@ -5,6 +5,14 @@ set -euo pipefail
 SCRIPT_NAME="$(basename "$0")"
 VERSION="1.0.0"
 
+# データ管理用ディレクトリとファイル
+DATA_DIR="./data"
+BACKUP_DIR="./data/backup"
+
+# US-001-BE-005: Checkpoint/Recovery support
+CHECKPOINT_FILE="$DATA_DIR/checkpoint.json"
+MAX_EXPONENTIAL_BACKOFF=300  # Maximum backoff delay in seconds
+
 # 環境変数デフォルト値
 AZURE_DEVOPS_PAT="${AZURE_DEVOPS_PAT:-}"
 AZURE_DEVOPS_ORG="${AZURE_DEVOPS_ORG:-}"
@@ -16,20 +24,29 @@ RETRY_DELAY="${RETRY_DELAY:-1}"
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-30}"
 BATCH_SIZE="${BATCH_SIZE:-50}"
 
-# ログ機能
+# ログ機能（US-001-BE-005: Enhanced logging with timestamps）
+log_message() {
+    local level="$1"
+    local message="$2"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    echo "[$timestamp] [$level] $message" >&2
+}
+
 log_error() {
-    echo "[ERROR] $*" >&2
+    log_message "ERROR" "$*"
 }
 
 log_warn() {
     if [[ "$LOG_LEVEL" != "ERROR" ]]; then
-        echo "[WARN] $*" >&2
+        log_message "WARN" "$*"
     fi
 }
 
 log_info() {
     if [[ "$LOG_LEVEL" == "INFO" ]]; then
-        echo "[INFO] $*"
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        echo "[$timestamp] [INFO] $*"
     fi
 }
 
@@ -223,7 +240,140 @@ cmd_config() {
     esac
 }
 
-# Azure DevOps API 呼び出し
+# US-001-BE-005: Enhanced API error handling and retry mechanism
+handle_api_error() {
+    local http_code="$1"
+    local response="$2"
+    local endpoint="$3"
+    
+    case "$http_code" in
+        401)
+            log_error "認証エラー: PATを確認してください"
+            log_error "対処法: 1) PATの有効期限を確認 2) アクセス権限を確認 3) 組織名を確認"
+            ;;
+        403)
+            log_error "権限エラー: プロジェクトへのアクセス権限がありません"
+            log_error "対処法: 1) PATに必要な権限が付与されているか確認 2) プロジェクトメンバーに追加されているか確認"
+            ;;
+        404)
+            log_error "リソースが見つかりません: $endpoint"
+            log_error "対処法: 1) プロジェクト名を確認 2) 組織名を確認 3) Work Item IDの存在を確認"
+            ;;
+        429)
+            # Extract Retry-After header if available
+            local retry_after
+            if [[ -n "$response" ]] && retry_after=$(echo "$response" | grep -i "retry-after" | head -1 | cut -d: -f2 | tr -d ' '); then
+                log_warn "レート制限: ${retry_after}秒後にリトライします (HTTP $http_code)"
+                return "$retry_after"
+            else
+                log_warn "レート制限: デフォルト待機時間でリトライします (HTTP $http_code)"
+                return 60
+            fi
+            ;;
+        500|502|503|504)
+            log_warn "サーバーエラー: しばらく待ってからリトライしてください (HTTP $http_code)"
+            log_warn "対処法: 1) Azure DevOpsサービスステータスを確認 2) 時間をおいて再実行"
+            ;;
+        000)
+            log_warn "ネットワークエラーまたはタイムアウト"
+            log_warn "対処法: 1) インターネット接続を確認 2) プロキシ設定を確認 3) タイムアウト値を調整"
+            ;;
+        *)
+            log_warn "予期しないHTTPステータスコード: $http_code"
+            if [[ -n "$response" ]]; then
+                log_warn "レスポンス内容（最初の200文字）: $(echo "$response" | head -c 200)"
+            fi
+            ;;
+    esac
+    
+    return 1
+}
+
+# US-001-BE-005: Exponential backoff retry mechanism
+retry_with_backoff() {
+    local command="$1"
+    local max_retries="${2:-$RETRY_COUNT}"
+    local initial_delay="${3:-$RETRY_DELAY}"
+    local endpoint="${4:-unknown}"
+    
+    local attempt=1
+    local delay="$initial_delay"
+    
+    while [[ $attempt -le $max_retries ]]; do
+        log_info "試行 $attempt/$max_retries (次回待機時間: ${delay}秒)"
+        
+        if eval "$command"; then
+            return 0
+        fi
+        
+        if [[ $attempt -lt $max_retries ]]; then
+            log_warn "リトライまで ${delay}秒 待機します..."
+            sleep "$delay"
+            
+            # Exponential backoff: double the delay up to maximum
+            delay=$((delay * 2))
+            if [[ $delay -gt $MAX_EXPONENTIAL_BACKOFF ]]; then
+                delay=$MAX_EXPONENTIAL_BACKOFF
+            fi
+            
+            ((attempt++))
+        else
+            log_error "最大リトライ回数($max_retries)に達しました: $endpoint"
+            return 1
+        fi
+    done
+    
+    return 1
+}
+
+# US-001-BE-005: Checkpoint mechanism for interruption recovery
+save_checkpoint() {
+    local checkpoint_data="$1"
+    local operation_type="$2"
+    
+    # Ensure data directory exists
+    mkdir -p "$(dirname "$CHECKPOINT_FILE")"
+    
+    local checkpoint_json
+    checkpoint_json=$(jq -n \
+        --arg timestamp "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        --arg operation "$operation_type" \
+        --argjson data "$checkpoint_data" \
+        '{
+            timestamp: $timestamp,
+            operation: $operation,
+            data: $data
+        }')
+    
+    echo "$checkpoint_json" > "$CHECKPOINT_FILE"
+    log_info "チェックポイント保存: $CHECKPOINT_FILE (操作: $operation_type)"
+}
+
+# US-001-BE-005: Load checkpoint for recovery
+load_checkpoint() {
+    if [[ -f "$CHECKPOINT_FILE" ]]; then
+        if jq empty "$CHECKPOINT_FILE" 2>/dev/null; then
+            log_info "チェックポイントから復旧: $CHECKPOINT_FILE"
+            cat "$CHECKPOINT_FILE"
+            return 0
+        else
+            log_warn "破損したチェックポイントファイルを削除: $CHECKPOINT_FILE"
+            rm -f "$CHECKPOINT_FILE"
+        fi
+    fi
+    
+    return 1
+}
+
+# US-001-BE-005: Clear checkpoint after successful completion
+clear_checkpoint() {
+    if [[ -f "$CHECKPOINT_FILE" ]]; then
+        rm -f "$CHECKPOINT_FILE"
+        log_info "チェックポイント削除: 処理完了"
+    fi
+}
+
+# Azure DevOps API 呼び出し（Enhanced with US-001-BE-005 features）
 call_ado_api() {
     local endpoint="$1"
     local method="${2:-GET}"
@@ -264,9 +414,10 @@ call_ado_api() {
     # Base64エンコード用のPAT（空のユーザー名とPATの組み合わせ）
     local auth_header="Authorization: Basic $(echo -n ":${AZURE_DEVOPS_PAT}" | base64 -w 0)"
 
-    # curlオプション設定
+    # curlオプション設定（Enhanced with header capture for Retry-After）
     local curl_opts=(
         -s
+        -D -    # Include response headers for Retry-After parsing
         -H "Content-Type: application/json"
         -H "$auth_header"
         -H "Accept: application/json"
@@ -293,20 +444,29 @@ call_ado_api() {
     # レスポンス一時ファイル
     local response_file
     response_file=$(mktemp)
+    local headers_file
+    headers_file=$(mktemp)
     
-    # リトライ処理
+    # リトライ処理（指数バックオフ）
     local attempt=1
+    local delay="$RETRY_DELAY"
     local http_code
     
     while [[ $attempt -le $RETRY_COUNT ]]; do
         {
-            log_info "試行 $attempt/$RETRY_COUNT"
+            log_info "試行 $attempt/$RETRY_COUNT (待機時間: ${delay}秒)"
         } >&2
         
         # API呼び出し実行
-        http_code=$(curl "${curl_opts[@]}" -o "$response_file" -w "%{http_code}" "$api_url" 2>/dev/null || echo "000")
+        local curl_output
+        curl_output=$(curl "${curl_opts[@]}" -o "$response_file" -w "%{http_code}" "$api_url" 2>/dev/null)
+        http_code=$(echo "$curl_output" | tail -1)
         
-        # HTTPステータスコード確認
+        # Extract headers and body
+        local headers
+        headers=$(echo "$curl_output" | head -n -1)
+        
+        # HTTPステータスコード確認（Enhanced with US-001-BE-005 error handling）
         case "$http_code" in
             200|201|204)
                 # 成功
@@ -320,59 +480,64 @@ call_ado_api() {
                         log_warn "API呼び出し成功だがレスポンスが空 (HTTP $http_code)"
                     } >&2
                 fi
-                rm -f "$response_file"
+                rm -f "$response_file" "$headers_file"
                 return 0
                 ;;
-            401)
-                log_error "認証エラー: PATが無効または期限切れです (HTTP $http_code)"
-                rm -f "$response_file"
-                return 1
-                ;;
-            403)
-                log_error "アクセス拒否: 権限が不足しています (HTTP $http_code)"
-                rm -f "$response_file"
-                return 1
-                ;;
-            404)
-                log_error "リソースが見つかりません: $api_url (HTTP $http_code)"
-                rm -f "$response_file"
+            401|403|404)
+                # Non-retryable errors
+                handle_api_error "$http_code" "$(cat "$response_file" 2>/dev/null)" "$endpoint"
+                rm -f "$response_file" "$headers_file"
                 return 1
                 ;;
             429)
-                log_warn "レート制限に達しました。${RETRY_DELAY}秒後にリトライします (HTTP $http_code)"
+                # Rate limiting - extract Retry-After if available
+                local retry_after
+                if retry_after=$(echo "$headers" | grep -i "retry-after:" | head -1 | cut -d: -f2 | tr -d ' \r\n'); then
+                    if [[ "$retry_after" =~ ^[0-9]+$ ]]; then
+                        delay="$retry_after"
+                        log_warn "レート制限: Retry-Afterヘッダーにより ${delay}秒 待機します (HTTP $http_code)"
+                    else
+                        delay=$((delay * 2))
+                        log_warn "レート制限: 指数バックオフにより ${delay}秒 待機します (HTTP $http_code)"
+                    fi
+                else
+                    delay=$((delay * 2))
+                    log_warn "レート制限: 指数バックオフにより ${delay}秒 待機します (HTTP $http_code)"
+                fi
                 ;;
-            500|502|503|504)
-                log_warn "サーバーエラーが発生しました。${RETRY_DELAY}秒後にリトライします (HTTP $http_code)"
-                ;;
-            000)
-                log_warn "ネットワークエラーまたはタイムアウトです。${RETRY_DELAY}秒後にリトライします"
+            500|502|503|504|000)
+                # Retryable errors
+                handle_api_error "$http_code" "$(cat "$response_file" 2>/dev/null)" "$endpoint"
+                delay=$((delay * 2))  # Exponential backoff
                 ;;
             *)
-                log_warn "予期しないHTTPステータスコード: $http_code。${RETRY_DELAY}秒後にリトライします"
-                # デバッグ用: レスポンス内容を表示
-                if [[ -s "$response_file" ]]; then
-                    {
-                        log_warn "レスポンス内容（最初の200文字）: $(head -c 200 "$response_file")"
-                    } >&2
-                fi
+                # Unknown errors
+                handle_api_error "$http_code" "$(cat "$response_file" 2>/dev/null)" "$endpoint"
+                delay=$((delay * 2))  # Exponential backoff
                 ;;
         esac
         
-        # 最後の試行でない場合はリトライ
+        # 最後の試行でない場合はリトライ（Enhanced with exponential backoff）
         if [[ $attempt -lt $RETRY_COUNT ]]; then
-            sleep "$RETRY_DELAY"
+            # Cap the delay at maximum
+            if [[ $delay -gt $MAX_EXPONENTIAL_BACKOFF ]]; then
+                delay=$MAX_EXPONENTIAL_BACKOFF
+            fi
+            
+            log_warn "${delay}秒後にリトライします..."
+            sleep "$delay"
             ((attempt++))
         else
-            log_error "API呼び出しが失敗しました (HTTP $http_code)"
+            log_error "API呼び出しが失敗しました (HTTP $http_code) - 最大リトライ回数に到達"
             if [[ -s "$response_file" ]]; then
-                log_error "レスポンス: $(cat "$response_file")"
+                log_error "最終レスポンス: $(cat "$response_file")"
             fi
-            rm -f "$response_file"
+            rm -f "$response_file" "$headers_file"
             return 1
         fi
     done
     
-    rm -f "$response_file"
+    rm -f "$response_file" "$headers_file"
     return 1
 }
 
@@ -462,10 +627,6 @@ test_api_connection() {
     fi
 }
 
-# データ管理用ディレクトリとファイル
-DATA_DIR="./data"
-BACKUP_DIR="./data/backup"
-
 # データディレクトリ初期化
 init_data_directories() {
     mkdir -p "$DATA_DIR" "$BACKUP_DIR"
@@ -518,7 +679,7 @@ load_json() {
     fi
 }
 
-# Work Items取得
+# Work Items取得（Enhanced with US-001-BE-005 checkpoint support）
 fetch_workitems() {
     local project="$1"
     local days="${2:-30}"
@@ -527,6 +688,27 @@ fetch_workitems() {
     
     # データディレクトリ初期化
     init_data_directories
+    
+    # US-001-BE-005: Check for existing checkpoint
+    local checkpoint_data
+    if checkpoint_data=$(load_checkpoint); then
+        local checkpoint_operation
+        checkpoint_operation=$(echo "$checkpoint_data" | jq -r '.operation')
+        if [[ "$checkpoint_operation" == "fetch_workitems" ]]; then
+            log_info "前回の中断から復旧します"
+            local checkpoint_project
+            checkpoint_project=$(echo "$checkpoint_data" | jq -r '.data.project')
+            if [[ "$checkpoint_project" == "$project" ]]; then
+                log_info "同一プロジェクトのチェックポイントが見つかりました。継続処理を開始します"
+            else
+                log_warn "異なるプロジェクトのチェックポイントです。新規処理を開始します"
+                clear_checkpoint
+            fi
+        else
+            log_warn "異なる操作のチェックポイントです。新規処理を開始します"
+            clear_checkpoint
+        fi
+    fi
     
     # 日付フィルタ計算（WIQL用に日付のみの形式）
     local changed_date=$(date -d "$days days ago" '+%Y-%m-%d' 2>/dev/null || date -v-${days}d '+%Y-%m-%d' 2>/dev/null)
@@ -645,9 +827,28 @@ fetch_workitems() {
     if save_json "workitems.json" "$all_workitems"; then
         log_info "Work Items取得完了: $total_count件"
         log_info "保存先: $DATA_DIR/workitems.json"
+        
+        # US-001-BE-005: Clear checkpoint on successful completion
+        clear_checkpoint
+        
         return 0
     else
         log_error "Work Itemsの保存に失敗しました"
+        
+        # US-001-BE-005: Save checkpoint for recovery
+        local checkpoint_state
+        checkpoint_state=$(jq -n \
+            --arg project "$project" \
+            --arg days "$days" \
+            --arg total_count "$total_count" \
+            '{
+                project: $project,
+                days: $days,
+                processed_count: ($total_count | tonumber),
+                stage: "data_save_failed"
+            }')
+        save_checkpoint "$checkpoint_state" "fetch_workitems"
+        
         return 1
     fi
 }
