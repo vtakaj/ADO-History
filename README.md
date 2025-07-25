@@ -55,7 +55,10 @@ cp .env.template .env
 ./ado-tracker.sh config template  # テンプレート生成
 
 # チケット履歴を取得
-./ado-tracker.sh fetch ProjectName 30  # 過去30日間のWork Items、ステータス履歴、詳細情報を取得
+./ado-tracker.sh fetch ProjectName 30  # 過去30日間のWork Itemsとステータス履歴を取得
+
+# 詳細情報も含めて取得
+./ado-tracker.sh fetch ProjectName 30 --with-details  # 詳細情報も含めて包括的に取得
 
 # ステータス変更履歴のみを取得
 ./ado-tracker.sh status-history ProjectName  # 既存Work Itemsのステータス変更履歴を取得
@@ -68,26 +71,33 @@ cp .env.template .env
 
 ### Work Items取得 (fetch)
 
-指定されたプロジェクトのWork Items（チケット）、ステータス変更履歴、および詳細情報を包括的に取得し、JSON形式でローカルに保存します。
+指定されたプロジェクトのWork Items（チケット）とステータス変更履歴を取得し、JSON形式でローカルに保存します。
 
-#### 取得される情報
+#### 基本動作
+通常のfetchコマンドでは以下の情報を取得します：
 - **基本情報**: チケット番号（ID）、タイトル、担当者、現在のステータス、最終更新日時
 - **ステータス履歴**: 各チケットのステータス変更履歴
+
+#### 詳細情報オプション
+`--with-details` オプションを指定すると、追加で詳細情報も取得されます：
 - **詳細情報**: チケット種別、優先度、作成日時、見積もり時間、説明等
 
 #### データ保存
 - 基本情報: `./data/workitems.json`
 - ステータス履歴: `./data/status_history.json`
-- 詳細情報: `./data/workitem_details.json`
+- 詳細情報: `./data/workitem_details.json`（--with-detailsオプション使用時のみ）
 - 既存データは `./data/backup/` に自動バックアップされます
 - ページネーション対応で大量データも処理可能
 
 #### 使用例
 ```bash
-# プロジェクト "MyProject" の過去30日間の全データを取得
+# プロジェクト "MyProject" の過去30日間の基本データを取得
 ./ado-tracker.sh fetch MyProject 30
 
-# 過去7日間の全データを取得
+# 詳細情報も含めて包括的に取得
+./ado-tracker.sh fetch MyProject 30 --with-details
+
+# 過去7日間の基本データを取得
 ./ado-tracker.sh fetch MyProject 7
 ```
 
@@ -143,8 +153,8 @@ cp .env.template .env
 # プロジェクト "MyProject" のWork Item詳細情報を取得
 ./ado-tracker.sh fetch-details MyProject
 
-# fetchコマンドでは自動的に詳細情報も同時取得されます
-./ado-tracker.sh fetch MyProject 30
+# fetchコマンドで詳細情報を含めて取得するには --with-details オプションを使用
+./ado-tracker.sh fetch MyProject 30 --with-details
 ```
 
 ## テスト実行

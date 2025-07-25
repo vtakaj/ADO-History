@@ -148,22 +148,24 @@ show_usage() {
 Usage: $SCRIPT_NAME <command> [options]
 
 Commands:
-  fetch <project> [days]          チケット履歴、ステータス変更履歴、詳細情報を取得
-  status-history <project>        ステータス変更履歴のみを取得
-  fetch-details <project>         Work Item詳細情報のみを取得
-  test-connection                 API接続テストを実行
-  test-connection --mock          モック環境でAPI機能をテスト
-  config [show|validate|template] 設定管理
-  help                            このヘルプを表示
+  fetch <project> [days] [--with-details]  チケット履歴とステータス変更履歴を取得
+  status-history <project>                 ステータス変更履歴のみを取得
+  fetch-details <project>                  Work Item詳細情報のみを取得
+  test-connection                          API接続テストを実行
+  test-connection --mock                   モック環境でAPI機能をテスト
+  config [show|validate|template]          設定管理
+  help                                     このヘルプを表示
 
 Options:
   -h, --help                 ヘルプを表示
   -v, --version              バージョンを表示
+  --with-details             fetch時に詳細情報も同時取得（オプション）
 
 Examples:
-  $SCRIPT_NAME fetch MyProject 30
+  $SCRIPT_NAME fetch MyProject 30                    # 基本情報とステータス履歴のみ
+  $SCRIPT_NAME fetch MyProject 30 --with-details     # 詳細情報も含めて取得
   $SCRIPT_NAME status-history MyProject
-  $SCRIPT_NAME fetch-details MyProject
+  $SCRIPT_NAME fetch-details MyProject               # 詳細情報のみ取得
   $SCRIPT_NAME test-connection
   $SCRIPT_NAME config show
   $SCRIPT_NAME config validate
@@ -1104,8 +1106,34 @@ fetch_all_status_history() {
 
 # コマンド実装
 cmd_fetch() {
-    local project="${1:-}"
-    local days="${2:-30}"
+    local project=""
+    local days="30"
+    local with_details=false
+    
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --with-details)
+                with_details=true
+                shift
+                ;;
+            -*)
+                echo "Error: 不明なオプション: $1" >&2
+                exit 1
+                ;;
+            *)
+                if [[ -z "$project" ]]; then
+                    project="$1"
+                elif [[ -z "$days" || "$days" == "30" ]]; then
+                    days="$1"
+                else
+                    echo "Error: 余分な引数: $1" >&2
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
     
     # バリデーション
     validate_project_name "$project" || exit 1
@@ -1140,15 +1168,18 @@ cmd_fetch() {
                 log_info ""
                 log_info "ステータス変更履歴の取得を開始します..."
                 if fetch_all_status_history "$project"; then
-                    log_info "ステータス変更履歴の取得が完了しました"
-                    
-                    # Automatically fetch work item details after status history
-                    log_info ""
-                    log_info "Work Item詳細情報の取得を開始します..."
-                    if fetch_all_details "$project"; then
-                        log_info "全データの取得が完了しました"
+                    # Optionally fetch work item details if requested
+                    if [[ "$with_details" == true ]]; then
+                        log_info ""
+                        log_info "Work Item詳細情報の取得を開始します..."
+                        if fetch_all_details "$project"; then
+                            log_info "全データ（詳細情報含む）の取得が完了しました"
+                        else
+                            log_warn "Work Item詳細情報の取得に失敗しましたが、基本データとステータス履歴の取得は成功しました"
+                        fi
                     else
-                        log_warn "Work Item詳細情報の取得に失敗しましたが、基本データとステータス履歴の取得は成功しました"
+                        log_info "全データの取得が完了しました"
+                        log_info "詳細情報が必要な場合は --with-details オプションまたは fetch-details コマンドを使用してください"
                     fi
                 else
                     log_warn "ステータス変更履歴の取得に失敗しましたが、Work Itemsの取得は成功しました"

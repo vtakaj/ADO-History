@@ -20,12 +20,19 @@ else
     exit 1
 fi
 
-# Test that the usage shows the new command
+# Test that the usage shows the new command and option
 usage_output=$(show_usage)
 if echo "$usage_output" | grep -q "fetch-details"; then
     echo "✓ fetch-details command listed in usage"
 else
     echo "✗ fetch-details command not found in usage"
+    exit 1
+fi
+
+if echo "$usage_output" | grep -q "with-details"; then
+    echo "✓ --with-details option listed in usage"
+else
+    echo "✗ --with-details option not found in usage"
     exit 1
 fi
 
