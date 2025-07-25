@@ -34,7 +34,10 @@
       "Bash(/workspace/test_workitem_details.sh:*)",
       "Bash(LC_ALL=C ./test_workitem_details.sh)",
       "Bash(LC_ALL=C:*)",
-      "Bash(./test_be004_simple.sh:*)"
+      "Bash(./test_be004_simple.sh:*)",
+      "Bash(./test_be005_error_handling.sh:*)",
+      "Bash(ls:*)",
+      "Bash(./test_fe001_console_output.sh:*)"
     ],
     "deny": []
   }

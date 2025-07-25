@@ -106,6 +106,14 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 
 # Work Item詳細情報のみを取得
 ./ado-tracker.sh fetch-details ProjectName  # 既存Work Itemsの詳細情報を取得
+
+# データの表示
+./ado-tracker.sh display table            # 取得済みチケット一覧をテーブル形式で表示
+./ado-tracker.sh display list             # 取得済みチケット一覧をリスト形式で表示
+./ado-tracker.sh display summary          # 取得済みチケットの統計サマリーを表示
+
+# チケット履歴の表示
+./ado-tracker.sh history 12345            # 指定チケットのステータス変更履歴を表示
 ```
 
 ## 機能詳細
@@ -198,6 +206,53 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 ./ado-tracker.sh fetch MyProject 30 --with-details
 ```
 
+### コンソール出力機能 (display)
+
+取得済みのチケット情報を見やすくコンソールに表示します。
+
+#### 表示形式
+
+- **table**: テーブル形式（ID、タイトル、担当者、ステータス）
+- **list**: リスト形式（1チケットずつ詳細表示）  
+- **summary**: 統計サマリー（総数、ステータス別内訳、担当者別内訳）
+
+#### 機能
+
+- カラー出力対応（ステータス別に色分け）
+- 日本語文字幅の適切な処理
+- ページング機能（lessコマンド連携）
+- NO_COLOR環境変数でカラー無効化可能
+
+#### 使用例
+
+```bash
+# テーブル形式で表示
+./ado-tracker.sh display table
+
+# リスト形式で表示  
+./ado-tracker.sh display list
+
+# 統計サマリーを表示
+./ado-tracker.sh display summary
+```
+
+### ステータス履歴表示 (history)
+
+指定したチケットのステータス変更履歴を時系列で表示します。
+
+#### 表示内容
+
+- 変更日時（日本時間）
+- 変更者
+- ステータス変更（変更前 → 変更後）
+
+#### 使用例
+
+```bash
+# チケット#12345の履歴を表示
+./ado-tracker.sh history 12345
+```
+
 ## テスト実行
 
 ```bash
@@ -215,6 +270,9 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 
 # Work Item詳細情報機能テスト
 ./test_workitem_details.sh
+
+# コンソール出力機能テスト
+./test_fe001_console_output.sh
 
 # 高度な設定テスト
 ./test_config_advanced.sh

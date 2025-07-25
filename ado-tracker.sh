@@ -168,6 +168,8 @@ Commands:
   fetch <project> [days] [--with-details]  チケット履歴とステータス変更履歴を取得
   status-history <project>                 ステータス変更履歴のみを取得
   fetch-details <project>                  Work Item詳細情報のみを取得
+  display [table|list|summary]             取得済みチケット一覧を表示
+  history <workitem_id>                    指定チケットのステータス履歴を表示
   test-connection                          API接続テストを実行
   test-connection --mock                   モック環境でAPI機能をテスト
   config [show|validate|template]          設定管理
@@ -183,6 +185,9 @@ Examples:
   $SCRIPT_NAME fetch MyProject 30 --with-details     # 詳細情報も含めて取得
   $SCRIPT_NAME status-history MyProject
   $SCRIPT_NAME fetch-details MyProject               # 詳細情報のみ取得
+  $SCRIPT_NAME display table                         # テーブル形式で表示
+  $SCRIPT_NAME display summary                       # サマリー形式で表示
+  $SCRIPT_NAME history 12345                         # チケット#12345の履歴表示
   $SCRIPT_NAME test-connection
   $SCRIPT_NAME config show
   $SCRIPT_NAME config validate
@@ -190,6 +195,25 @@ Examples:
   $SCRIPT_NAME help
 EOF
 }
+
+# US-001-FE-001: カラー設定
+setup_colors() {
+    if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
+        RED='\033[0;31m'
+        GREEN='\033[0;32m'
+        YELLOW='\033[0;33m'
+        BLUE='\033[0;34m'
+        BOLD='\033[1m'
+        RESET='\033[0m'
+    else
+        RED='' GREEN='' YELLOW='' BLUE='' BOLD='' RESET=''
+    fi
+}
+
+# 出力制御設定
+OUTPUT_FORMAT="${OUTPUT_FORMAT:-table}"  # table|list|summary
+PAGER="${PAGER:-less -R}"               # ページャー設定
+NO_COLOR="${NO_COLOR:-0}"               # カラー無効化
 
 # 引数バリデーション
 validate_project_name() {
@@ -1484,8 +1508,277 @@ cmd_fetch_details() {
     fi
 }
 
+# US-001-FE-001: 進捗表示
+show_progress() {
+    local current="$1"
+    local total="$2"
+    local message="$3"
+    
+    local percentage=$((current * 100 / total))
+    local bar_length=50
+    local filled_length=$((percentage * bar_length / 100))
+    
+    # プログレスバー作成
+    local bar=""
+    for ((i=0; i<filled_length; i++)); do bar+="█"; done
+    for ((i=filled_length; i<bar_length; i++)); do bar+="░"; done
+    
+    printf "\r${BLUE}[%s] %3d%% (%d/%d) %s${RESET}" \
+        "$bar" "$percentage" "$current" "$total" "$message"
+    
+    if [[ "$current" -eq "$total" ]]; then
+        echo  # 改行
+    fi
+}
+
+# US-001-FE-001: スピナー表示
+show_spinner() {
+    local pid="$1"
+    local message="$2"
+    local spinner="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    local i=0
+    
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r${YELLOW}%s ${message}${RESET}" "${spinner:i++%${#spinner}:1}"
+        sleep 0.1
+    done
+    printf "\r%*s\r" $((${#message} + 10)) ""  # クリア
+}
+
+# US-001-FE-001: チケット一覧表示
+display_workitems() {
+    local format="${1:-table}"
+    local workitems_file="$DATA_DIR/workitems.json"
+    
+    if [[ ! -f "$workitems_file" ]]; then
+        echo "${RED}エラー: チケットデータが見つかりません${RESET}" >&2
+        return 1
+    fi
+    
+    case "$format" in
+        table)
+            display_workitems_table "$workitems_file"
+            ;;
+        list)
+            display_workitems_list "$workitems_file"
+            ;;
+        summary)
+            display_workitems_summary "$workitems_file"
+            ;;
+        *)
+            log_error "サポートされていない表示形式: $format"
+            return 1
+            ;;
+    esac
+}
+
+# US-001-FE-001: テーブル形式表示
+display_workitems_table() {
+    local workitems_file="$1"
+    
+    printf "${BOLD}%-8s %-50s %-20s %-15s${RESET}\n" \
+        "ID" "タイトル" "担当者" "ステータス"
+    printf "%-8s %-50s %-20s %-15s\n" \
+        "--------" "$(printf '%.50s' "$(printf '%*s' 50 '' | tr ' ' '-')")" \
+        "$(printf '%.20s' "$(printf '%*s' 20 '' | tr ' ' '-')")" \
+        "$(printf '%.15s' "$(printf '%*s' 15 '' | tr ' ' '-')")"
+    
+    jq -r '.workitems[] | [.id, .title, .assignedTo, .state] | @tsv' "$workitems_file" | \
+    while IFS=$'\t' read -r id title assignedTo state; do
+        # 文字列切り詰め
+        title=$(printf '%.50s' "$title")
+        assignedTo=$(printf '%.20s' "$assignedTo")
+        
+        # ステータス別カラー
+        case "$state" in
+            "New"|"Proposed") color="$BLUE" ;;
+            "Active"|"In Progress") color="$YELLOW" ;;
+            "Resolved"|"Completed") color="$GREEN" ;;
+            "Closed"|"Done") color="$GREEN" ;;
+            *) color="$RESET" ;;
+        esac
+        
+        printf "%-8s %-50s %-20s ${color}%-15s${RESET}\n" \
+            "$id" "$title" "$assignedTo" "$state"
+    done
+}
+
+# US-001-FE-001: リスト形式表示
+display_workitems_list() {
+    local workitems_file="$1"
+    
+    jq -r '.workitems[] | [.id, .title, .assignedTo, .state] | @tsv' "$workitems_file" | \
+    while IFS=$'\t' read -r id title assignedTo state; do
+        # ステータス別カラー
+        case "$state" in
+            "New"|"Proposed") color="$BLUE" ;;
+            "Active"|"In Progress") color="$YELLOW" ;;
+            "Resolved"|"Completed") color="$GREEN" ;;
+            "Closed"|"Done") color="$GREEN" ;;
+            *) color="$RESET" ;;
+        esac
+        
+        echo "${BOLD}Work Item #${id}${RESET}"
+        echo "  タイトル: $title"
+        echo "  担当者: $assignedTo"
+        echo "  ステータス: ${color}${state}${RESET}"
+        echo
+    done
+}
+
+# US-001-FE-001: サマリー統計表示
+display_workitems_summary() {
+    local workitems_file="$1"
+    
+    echo "${BOLD}=== チケット統計 ===${RESET}"
+    echo
+    
+    # 総数
+    local total_count
+    total_count=$(jq '.workitems | length' "$workitems_file")
+    echo "総チケット数: ${BOLD}$total_count${RESET}"
+    echo
+    
+    # ステータス別統計
+    echo "${BOLD}ステータス別内訳:${RESET}"
+    jq -r '.workitems | group_by(.state) | .[] | "\(.[0].state): \(length)"' \
+        "$workitems_file" | \
+    while IFS=': ' read -r status count; do
+        case "$status" in
+            "New"|"Proposed") color="$BLUE" ;;
+            "Active"|"In Progress") color="$YELLOW" ;;
+            "Resolved"|"Completed"|"Closed"|"Done") color="$GREEN" ;;
+            *) color="$RESET" ;;
+        esac
+        printf "  ${color}%-15s: %3d${RESET}\n" "$status" "$count"
+    done
+    echo
+    
+    # 担当者別統計
+    echo "${BOLD}担当者別内訳 (上位5名):${RESET}"
+    jq -r '.workitems | group_by(.assignedTo) | 
+           sort_by(length) | reverse | 
+           .[0:5] | .[] | "\(.[0].assignedTo): \(length)"' \
+        "$workitems_file" | \
+    while IFS=': ' read -r assignee count; do
+        printf "  %-30s: %3d\n" "$assignee" "$count"
+    done
+}
+
+# US-001-FE-001: ステータス履歴表示
+display_status_history() {
+    local workitem_id="$1"
+    local history_file="$DATA_DIR/status_history.json"
+    
+    if [[ ! -f "$history_file" ]]; then
+        echo "${RED}エラー: ステータス履歴データが見つかりません${RESET}" >&2
+        return 1
+    fi
+    
+    echo "${BOLD}=== チケット #${workitem_id} ステータス履歴 ===${RESET}"
+    echo
+    
+    jq -r --arg id "$workitem_id" \
+        '.status_history[] | select(.workitemId == ($id | tonumber)) | 
+         [.changeDate, .changedBy, .previousStatus, .newStatus] | @tsv' \
+        "$history_file" | \
+    while IFS=$'\t' read -r changeDate changedBy previousStatus newStatus; do
+        # 日時フォーマット
+        local formatted_date
+        formatted_date=$(date -d "$changeDate" '+%Y-%m-%d %H:%M' 2>/dev/null || \
+                        date -j -f "%Y-%m-%dT%H:%M:%S" "${changeDate%+*}" '+%Y-%m-%d %H:%M' 2>/dev/null || \
+                        echo "$changeDate")
+        
+        printf "${BLUE}%s${RESET} ${BOLD}%s${RESET}\n" "$formatted_date" "$changedBy"
+        printf "  %s → ${GREEN}%s${RESET}\n" "$previousStatus" "$newStatus"
+        echo
+    done
+}
+
+# US-001-FE-001: ページング対応出力
+paginated_output() {
+    local content="$1"
+    
+    if [[ -t 1 ]] && command -v "$PAGER" >/dev/null; then
+        echo "$content" | $PAGER
+    else
+        echo "$content"
+    fi
+}
+
+# US-001-FE-001: display コマンド実装
+cmd_display() {
+    local format="${1:-table}"
+    
+    # フォーマット検証
+    case "$format" in
+        table|list|summary)
+            ;;
+        *)
+            echo "Error: サポートされていない表示形式: $format" >&2
+            echo "サポート形式: table, list, summary" >&2
+            exit 1
+            ;;
+    esac
+    
+    # データファイル存在確認
+    if [[ ! -f "$DATA_DIR/workitems.json" ]]; then
+        echo "${RED}エラー: チケットデータが見つかりません${RESET}" >&2
+        echo "先に fetch コマンドでデータを取得してください" >&2
+        exit 1
+    fi
+    
+    log_info "チケット一覧を $format 形式で表示します"
+    
+    # 表示実行
+    local output
+    if output=$(display_workitems "$format"); then
+        paginated_output "$output"
+    else
+        log_error "チケット一覧の表示に失敗しました"
+        exit 1
+    fi
+}
+
+# US-001-FE-001: history コマンド実装
+cmd_history() {
+    local workitem_id="${1:-}"
+    
+    # Work Item ID検証
+    if [[ -z "$workitem_id" ]]; then
+        echo "Error: Work Item IDを指定してください" >&2
+        exit 1
+    fi
+    
+    if [[ ! "$workitem_id" =~ ^[0-9]+$ ]]; then
+        echo "Error: Work Item IDは数値で指定してください" >&2
+        exit 1
+    fi
+    
+    # データファイル存在確認
+    if [[ ! -f "$DATA_DIR/status_history.json" ]]; then
+        echo "${RED}エラー: ステータス履歴データが見つかりません${RESET}" >&2
+        echo "先に fetch または status-history コマンドでデータを取得してください" >&2
+        exit 1
+    fi
+    
+    log_info "Work Item #$workitem_id のステータス履歴を表示します"
+    
+    # 履歴表示実行
+    local output
+    if output=$(display_status_history "$workitem_id"); then
+        paginated_output "$output"
+    else
+        log_error "ステータス履歴の表示に失敗しました"
+        exit 1
+    fi
+}
+
 # メイン処理
 main() {
+    # カラー設定初期化
+    setup_colors
+    
     # .env ファイル読み込み
     load_env_file
     
@@ -1500,6 +1793,12 @@ main() {
             ;;
         fetch-details)
             cmd_fetch_details "${@:2}"
+            ;;
+        display)
+            cmd_display "${@:2}"
+            ;;
+        history)
+            cmd_history "${@:2}"
             ;;
         test-connection)
             if [[ "${2:-}" == "--mock" ]]; then
