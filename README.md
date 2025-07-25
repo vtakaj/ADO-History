@@ -57,34 +57,47 @@ cp .env.template .env
 # チケット履歴を取得
 ./ado-tracker.sh fetch ProjectName 30  # 過去30日間のWork Itemsとステータス履歴を取得
 
+# 詳細情報も含めて取得
+./ado-tracker.sh fetch ProjectName 30 --with-details  # 詳細情報も含めて包括的に取得
+
 # ステータス変更履歴のみを取得
 ./ado-tracker.sh status-history ProjectName  # 既存Work Itemsのステータス変更履歴を取得
+
+# Work Item詳細情報のみを取得
+./ado-tracker.sh fetch-details ProjectName  # 既存Work Itemsの詳細情報を取得
 ```
 
 ## 機能詳細
 
 ### Work Items取得 (fetch)
 
-指定されたプロジェクトのWork Items（チケット）を取得し、JSON形式でローカルに保存します。
+指定されたプロジェクトのWork Items（チケット）とステータス変更履歴を取得し、JSON形式でローカルに保存します。
 
-#### 取得される情報
-- チケット番号（ID）
-- チケットタイトル
-- 担当者情報
-- 現在のステータス
-- 最終更新日時
+#### 基本動作
+通常のfetchコマンドでは以下の情報を取得します：
+- **基本情報**: チケット番号（ID）、タイトル、担当者、現在のステータス、最終更新日時
+- **ステータス履歴**: 各チケットのステータス変更履歴
+
+#### 詳細情報オプション
+`--with-details` オプションを指定すると、追加で詳細情報も取得されます：
+- **詳細情報**: チケット種別、優先度、作成日時、見積もり時間、説明等
 
 #### データ保存
-- 取得されたデータは `./data/workitems.json` に保存されます
+- 基本情報: `./data/workitems.json`
+- ステータス履歴: `./data/status_history.json`
+- 詳細情報: `./data/workitem_details.json`（--with-detailsオプション使用時のみ）
 - 既存データは `./data/backup/` に自動バックアップされます
 - ページネーション対応で大量データも処理可能
 
 #### 使用例
 ```bash
-# プロジェクト "MyProject" の過去30日間のWork Itemsを取得
+# プロジェクト "MyProject" の過去30日間の基本データを取得
 ./ado-tracker.sh fetch MyProject 30
 
-# 過去7日間のWork Itemsを取得
+# 詳細情報も含めて包括的に取得
+./ado-tracker.sh fetch MyProject 30 --with-details
+
+# 過去7日間の基本データを取得
 ./ado-tracker.sh fetch MyProject 7
 ```
 
@@ -114,6 +127,36 @@ cp .env.template .env
 ./ado-tracker.sh fetch MyProject 30
 ```
 
+### Work Item詳細情報取得 (fetch-details)
+
+各Work Itemの詳細情報を取得し、日本時間で記録します。既存のworkitems.jsonが必要です。
+
+#### 取得される情報
+- Work Item ID
+- チケットタイトル
+- チケットタイプ（User Story、Bug、Task等）
+- 優先度
+- 作成日時（日本時間 JST）
+- 最終更新日時（日本時間 JST）
+- 見積もり時間（原始見積）
+- 担当者
+- 現在のステータス
+- 説明（オプション）
+
+#### データ保存
+- 取得されたデータは `./data/workitem_details.json` に保存されます
+- 既存データは `./data/backup/` に自動バックアップされます
+- バッチ処理による高速取得
+
+#### 使用例
+```bash
+# プロジェクト "MyProject" のWork Item詳細情報を取得
+./ado-tracker.sh fetch-details MyProject
+
+# fetchコマンドで詳細情報を含めて取得するには --with-details オプションを使用
+./ado-tracker.sh fetch MyProject 30 --with-details
+```
+
 ## テスト実行
 
 ```bash
@@ -128,6 +171,9 @@ cp .env.template .env
 
 # ステータス変更履歴機能テスト
 ./test_status_history.sh
+
+# Work Item詳細情報機能テスト
+./test_workitem_details.sh
 
 # 高度な設定テスト
 ./test_config_advanced.sh

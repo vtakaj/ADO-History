@@ -30,7 +30,11 @@
       "Bash(./test_status_history.sh:*)",
       "Bash(TZ:*)",
       "Bash(convert_to_jst \"2025-01-16T14:20:00Z\")",
-      "Bash(./ado-tracker.sh:*)"
+      "Bash(./ado-tracker.sh:*)",
+      "Bash(/workspace/test_workitem_details.sh:*)",
+      "Bash(LC_ALL=C ./test_workitem_details.sh)",
+      "Bash(LC_ALL=C:*)",
+      "Bash(./test_be004_simple.sh:*)"
     ],
     "deny": []
   }
