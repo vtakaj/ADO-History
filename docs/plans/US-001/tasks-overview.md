@@ -8,7 +8,7 @@ As a システム I want Azure DevOps APIを使用してチケットのステー
 ## Task Decomposition Summary
 
 ### Backend Tasks (5 tasks)
-- `US-001-BE-001`: Azure DevOps API接続設定とPAT認証実装
+- `US-001-BE-001`: Azure DevOps API接続設定とPAT認証実装 ✅ **done**
 - `US-001-BE-002`: チケット一覧取得機能実装
 - `US-001-BE-003`: チケットステータス変更履歴取得機能実装
 - `US-001-BE-004`: チケット詳細情報取得機能実装
@@ -17,7 +17,7 @@ As a システム I want Azure DevOps APIを使用してチケットのステー
 ### Infrastructure Tasks (3 tasks)
 - `US-001-INF-001`: シェルスクリプト基本構造作成 ✅ **done**
 - `US-001-INF-002`: データ保存用ディレクトリ構造とJSONファイル管理実装
-- `US-001-INF-003`: 設定管理と環境変数処理実装
+- `US-001-INF-003`: 設定管理と環境変数処理実装 ✅ **done**
 
 ### Frontend Tasks (1 task)
 - `US-001-FE-001`: コンソール出力フォーマット実装

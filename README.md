@@ -46,6 +46,9 @@ cp .env.template .env
 # ヘルプを表示
 ./ado-tracker.sh help
 
+# API接続テスト
+./ado-tracker.sh test-connection   # Azure DevOps API接続テスト
+
 # 設定管理
 ./ado-tracker.sh config show      # 設定表示
 ./ado-tracker.sh config validate  # 設定検証
@@ -60,6 +63,9 @@ cp .env.template .env
 ```bash
 # 基本テスト
 ./test_ado_tracker.sh
+
+# API機能テスト
+./test_api_functions.sh
 
 # 高度な設定テスト
 ./test_config_advanced.sh

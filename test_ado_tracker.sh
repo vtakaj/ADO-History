@@ -125,6 +125,14 @@ run_test_with_output "Config validate without PAT" 2 "AZURE_DEVOPS_PAT が設定
 # Test 15: Config invalid subcommand
 run_test_with_output "Config invalid subcommand" 1 "Usage: ado-tracker.sh config" "$SCRIPT_PATH" config invalid
 
+# API Connection Tests
+
+# Test 16: Test connection without PAT
+run_test_with_output "Test connection without PAT" 1 "AZURE_DEVOPS_PAT が設定されていません" "$SCRIPT_PATH" test-connection
+
+# Test 17: Test connection command availability
+run_test_with_output "Test connection command in help" 0 "test-connection" "$SCRIPT_PATH" help
+
 echo "=================================="
 echo "Test Summary:"
 echo "Total tests: $TEST_COUNT"
