@@ -54,8 +54,35 @@ cp .env.template .env
 ./ado-tracker.sh config validate  # 設定検証
 ./ado-tracker.sh config template  # テンプレート生成
 
-# チケット履歴を取得（実装予定）
-./ado-tracker.sh fetch ProjectName 30
+# チケット履歴を取得
+./ado-tracker.sh fetch ProjectName 30  # 過去30日間のWork Itemsを取得
+```
+
+## 機能詳細
+
+### Work Items取得 (fetch)
+
+指定されたプロジェクトのWork Items（チケット）を取得し、JSON形式でローカルに保存します。
+
+#### 取得される情報
+- チケット番号（ID）
+- チケットタイトル
+- 担当者情報
+- 現在のステータス
+- 最終更新日時
+
+#### データ保存
+- 取得されたデータは `./data/workitems.json` に保存されます
+- 既存データは `./data/backup/` に自動バックアップされます
+- ページネーション対応で大量データも処理可能
+
+#### 使用例
+```bash
+# プロジェクト "MyProject" の過去30日間のWork Itemsを取得
+./ado-tracker.sh fetch MyProject 30
+
+# 過去7日間のWork Itemsを取得
+./ado-tracker.sh fetch MyProject 7
 ```
 
 ## テスト実行
@@ -66,6 +93,9 @@ cp .env.template .env
 
 # API機能テスト
 ./test_api_functions.sh
+
+# Work Items取得機能テスト
+./test_workitems_fetch.sh
 
 # 高度な設定テスト
 ./test_config_advanced.sh

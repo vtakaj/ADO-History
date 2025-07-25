@@ -244,9 +244,19 @@ call_ado_api() {
     local auth_header="Authorization: Basic $(echo -n ":${AZURE_DEVOPS_PAT}" | base64 -w 0)"
     
     # API URL構築
-    local api_url="https://dev.azure.com/${AZURE_DEVOPS_ORG}/${endpoint}?api-version=${API_VERSION}"
+    local api_url="https://dev.azure.com/${AZURE_DEVOPS_ORG}/${endpoint}"
     
-    log_info "API呼び出し: $method $api_url"
+    # api-versionパラメータの追加（既存パラメータがある場合は&で結合）
+    if [[ "$endpoint" == *"?"* ]]; then
+        api_url="${api_url}&api-version=${API_VERSION}"
+    else
+        api_url="${api_url}?api-version=${API_VERSION}"
+    fi
+    
+    # ログ出力を標準エラーに送る（レスポンスの汚染防止）
+    {
+        log_info "API呼び出し: $method $api_url"
+    } >&2
     
     # curlオプション設定
     local curl_opts=(
@@ -284,7 +294,9 @@ call_ado_api() {
     local http_code
     
     while [[ $attempt -le $RETRY_COUNT ]]; do
-        log_info "試行 $attempt/$RETRY_COUNT"
+        {
+            log_info "試行 $attempt/$RETRY_COUNT"
+        } >&2
         
         # API呼び出し実行
         http_code=$(curl "${curl_opts[@]}" -o "$response_file" "$api_url" 2>/dev/null || echo "000")
@@ -432,7 +444,211 @@ test_api_connection() {
     fi
 }
 
-# コマンド実装（後で実装される）
+# データ管理用ディレクトリとファイル
+DATA_DIR="./data"
+BACKUP_DIR="./data/backup"
+
+# データディレクトリ初期化
+init_data_directories() {
+    mkdir -p "$DATA_DIR" "$BACKUP_DIR"
+    chmod 700 "$DATA_DIR" "$BACKUP_DIR"
+    
+    log_info "データディレクトリを初期化: $DATA_DIR"
+}
+
+# JSONファイル保存
+save_json() {
+    local filename="$1"
+    local data="$2"
+    local filepath="$DATA_DIR/$filename"
+    
+    # データディレクトリが存在しない場合は初期化
+    if [[ ! -d "$DATA_DIR" ]]; then
+        init_data_directories
+    fi
+    
+    # バックアップ作成
+    if [[ -f "$filepath" ]]; then
+        cp "$filepath" "$BACKUP_DIR/${filename}.$(date +%Y%m%d_%H%M%S)"
+    fi
+    
+    # JSON形式検証
+    if echo "$data" | jq empty 2>/dev/null; then
+        echo "$data" | jq '.' > "$filepath"
+        chmod 600 "$filepath"
+        log_info "JSONファイル保存: $filepath"
+    else
+        log_error "無効なJSON形式: $filename"
+        return 1
+    fi
+}
+
+# JSONファイル読み込み
+load_json() {
+    local filename="$1"
+    local filepath="$DATA_DIR/$filename"
+    
+    if [[ -f "$filepath" ]]; then
+        if jq empty "$filepath" 2>/dev/null; then
+            cat "$filepath"
+        else
+            log_error "破損したJSONファイル: $filepath"
+            return 1
+        fi
+    else
+        echo "{}"
+    fi
+}
+
+# Work Items取得
+fetch_workitems() {
+    local project="$1"
+    local days="${2:-30}"
+    
+    log_info "プロジェクト '$project' のWork Items取得を開始"
+    
+    # データディレクトリ初期化
+    init_data_directories
+    
+    # 日付フィルタ計算（WIQL用に日付のみの形式）
+    local changed_date=$(date -d "$days days ago" '+%Y-%m-%d' 2>/dev/null || date -v-${days}d '+%Y-%m-%d' 2>/dev/null)
+    
+    # Work Items WIQL (Work Item Query Language) APIを使用
+    local wiql_endpoint="${project}/_apis/wit/wiql"
+    
+    # WIQL クエリ（過去N日間のWork Items）
+    # プロジェクト内の全Work Itemsから日付フィルタで絞り込み
+    local wiql_query="SELECT [System.Id] FROM WorkItems WHERE [System.ChangedDate] >= '$changed_date' ORDER BY [System.ChangedDate] DESC"
+    
+    local wiql_data="{\"query\": \"$wiql_query\"}"
+    
+    log_info "WIQL クエリでWork Items IDsを取得中"
+    if [[ "$LOG_LEVEL" == "INFO" ]]; then
+        log_info "クエリ: $wiql_query"
+    fi
+    
+    # WIQLクエリでWork Item IDsを取得
+    local wiql_response
+    if wiql_response=$(call_ado_api "$wiql_endpoint" "POST" "$wiql_data"); then
+        log_info "WIQL クエリ成功"
+        
+        
+        # レスポンスからJSONの開始位置を見つける
+        local json_response
+        json_response=$(echo "$wiql_response" | grep -o '{.*}' | head -1)
+        
+        # JSONが有効かチェック
+        if ! echo "$json_response" | jq empty 2>/dev/null; then
+            log_error "無効なJSONレスポンスを受信しました"
+            log_error "元レスポンス: $(echo "$wiql_response" | head -c 500)..."
+            return 1
+        fi
+        
+        # 有効なJSONレスポンスを使用
+        wiql_response="$json_response"
+        
+        # Work Item IDsを抽出
+        local workitem_ids
+        workitem_ids=$(echo "$wiql_response" | jq -r '.workItems[]?.id' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+        
+        if [[ -z "$workitem_ids" ]]; then
+            log_info "指定条件のWork Itemsが見つかりませんでした"
+            save_json "workitems.json" '{"workitems": []}'
+            return 0
+        fi
+        
+        log_info "Work Item IDs取得: $(echo "$workitem_ids" | tr ',' '\n' | wc -l)件"
+        
+        # Work Items詳細を取得（バッチ処理）
+        local all_workitems='{"workitems": []}'
+        local total_count=0
+        
+        # IDsを配列に変換してバッチ処理
+        local ids_array
+        ids_array=$(echo "$workitem_ids" | tr ',' '\n')
+        
+        local batch_ids=""
+        local batch_count=0
+        
+        while IFS= read -r id; do
+            if [[ -n "$id" ]]; then
+                if [[ -n "$batch_ids" ]]; then
+                    batch_ids="${batch_ids},${id}"
+                else
+                    batch_ids="$id"
+                fi
+                ((batch_count++))
+                
+                # バッチサイズに達したか、最後のIDの場合は処理実行
+                local total_ids_count
+                total_ids_count=$(echo "$ids_array" | wc -l)
+                local current_total=$((total_count + batch_count))
+                if [[ $batch_count -ge $BATCH_SIZE ]] || [[ $total_ids_count -eq $current_total ]]; then
+                    local batch_endpoint="${project}/_apis/wit/workitems?ids=${batch_ids}&\$expand=Fields"
+                    
+                    log_info "Work Items詳細取得 (バッチ: $batch_count件)"
+                    
+                    local batch_response
+                    if batch_response=$(call_ado_api "$batch_endpoint"); then
+                        # Work Items情報を抽出
+                        local workitems_batch
+                        workitems_batch=$(echo "$batch_response" | jq -c '.value[] | {id: .id, title: (.fields["System.Title"] // ""), assignedTo: ((.fields["System.AssignedTo"] // {}).displayName // ""), state: (.fields["System.State"] // ""), lastModified: (.fields["System.ChangedDate"] // "")}')
+                        
+                        if [[ -n "$workitems_batch" ]]; then
+                            local batch_array
+                            batch_array=$(echo "$workitems_batch" | jq -s '.')
+                            
+                            all_workitems=$(echo "$all_workitems" | jq --argjson batch "$batch_array" '.workitems += $batch')
+                            
+                            total_count=$((total_count + batch_count))
+                            log_info "バッチ処理完了: $batch_count件 (累計: $total_count件)"
+                        fi
+                        
+                        # レート制限対応の待機
+                        sleep 0.5
+                    else
+                        log_error "Work Items詳細取得に失敗: IDs=$batch_ids"
+                        return 1
+                    fi
+                    
+                    # バッチリセット
+                    batch_ids=""
+                    batch_count=0
+                fi
+            fi
+        done <<< "$ids_array"
+        
+    else
+        log_error "WIQL クエリに失敗しました"
+        return 1
+    fi
+    
+    # データの保存
+    if save_json "workitems.json" "$all_workitems"; then
+        log_info "Work Items取得完了: $total_count件"
+        log_info "保存先: $DATA_DIR/workitems.json"
+        return 0
+    else
+        log_error "Work Itemsの保存に失敗しました"
+        return 1
+    fi
+}
+
+# Work Items基本情報抽出
+extract_workitem_info() {
+    local workitems_json="$1"
+    
+    if [[ -z "$workitems_json" ]]; then
+        log_error "Work Items JSONデータが指定されていません"
+        return 1
+    fi
+    
+    # 基本情報の抽出と検証
+    echo "$workitems_json" | jq -r '.workitems[] | 
+        "ID: \(.id), Title: \(.title), Assignee: \(.assignedTo), State: \(.state), Modified: \(.lastModified)"'
+}
+
+# コマンド実装
 cmd_fetch() {
     local project="${1:-}"
     local days="${2:-30}"
@@ -441,9 +657,36 @@ cmd_fetch() {
     validate_project_name "$project" || exit 1
     validate_days "$days" || exit 1
     
-    echo "fetch コマンドの実装予定地"
-    echo "プロジェクト: $project"
-    echo "日数: $days"
+    # 設定検証
+    if ! validate_config; then
+        log_error "設定が不正です。config validateコマンドで確認してください"
+        exit 2
+    fi
+    
+    # Work Items取得実行
+    if fetch_workitems "$project" "$days"; then
+        log_info "チケット履歴の取得が完了しました"
+        
+        # 取得データの概要表示
+        local workitems_data
+        workitems_data=$(load_json "workitems.json")
+        
+        if [[ -n "$workitems_data" ]]; then
+            local count
+            count=$(echo "$workitems_data" | jq '.workitems | length')
+            log_info "取得されたWork Items数: $count件"
+            
+            # 最初の5件を表示（サンプル）
+            if [[ "$count" -gt 0 ]]; then
+                log_info "取得データのサンプル（最初の5件）:"
+                echo "$workitems_data" | jq -r '.workitems[0:5][] | 
+                    "  - [\(.id)] \(.title) (\(.state)) - \(.assignedTo)"'
+            fi
+        fi
+    else
+        log_error "チケット履歴の取得に失敗しました"
+        exit 1
+    fi
 }
 
 # メイン処理
