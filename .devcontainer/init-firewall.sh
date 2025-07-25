@@ -58,7 +58,8 @@ for domain in \
     "statsig.anthropic.com" \
     "pypi.org"\
     "files.pythonhosted.org"\
-    "statsig.com"; do
+    "statsig.com"\
+    "dev.azure.com"; do
     echo "Resolving $domain..."
     ips=$(dig +short A "$domain")
     if [ -z "$ips" ]; then

@@ -150,6 +150,7 @@ Usage: $SCRIPT_NAME <command> [options]
 Commands:
   fetch <project> [days]     チケット履歴を取得
   test-connection            API接続テストを実行
+  test-connection --mock     モック環境でAPI機能をテスト
   config [show|validate|template] 設定管理
   help                       このヘルプを表示
 
@@ -345,6 +346,45 @@ call_ado_api() {
     return 1
 }
 
+# API接続テスト（モック版）
+test_api_connection_mock() {
+    log_info "Azure DevOps API接続テスト（モック環境）を開始します"
+    
+    # 設定値検証
+    if ! validate_config; then
+        log_error "設定値が不正です"
+        return 1
+    fi
+    
+    log_info "組織: $AZURE_DEVOPS_ORG"
+    log_info "PAT: $(mask_pat "$AZURE_DEVOPS_PAT")"
+    log_info "APIバージョン: $API_VERSION"
+    
+    log_info "モック環境でAPI機能をテストします..."
+    
+    # モックレスポンスの生成
+    local mock_response='{"count":3,"value":[{"id":"project1-id","name":"ProjectAlpha","description":"Main development project"},{"id":"project2-id","name":"ProjectBeta","description":"Testing project"},{"id":"project3-id","name":"ProjectGamma","description":"Research project"}]}'
+    
+    log_info "✓ API接続テスト成功（モック）"
+    log_info "✓ 認証確認完了（モック）"
+    log_info "✓ 利用可能なプロジェクト数: 3"
+    
+    # プロジェクト一覧表示
+    if command -v jq >/dev/null 2>&1; then
+        echo "$mock_response" | jq -r '.value[] | "  - \(.name) (ID: \(.id))"'
+    else
+        echo "  - ProjectAlpha (ID: project1-id)"
+        echo "  - ProjectBeta (ID: project2-id)" 
+        echo "  - ProjectGamma (ID: project3-id)"
+    fi
+    
+    log_info ""
+    log_info "注意: これはモック環境でのテストです"
+    log_info "実際のAzure DevOps APIに接続するには --mock オプションを外してください"
+    
+    return 0
+}
+
 # API接続テスト
 test_api_connection() {
     log_info "Azure DevOps API接続テストを開始します"
@@ -418,7 +458,11 @@ main() {
             cmd_fetch "${@:2}"
             ;;
         test-connection)
-            test_api_connection
+            if [[ "${2:-}" == "--mock" ]]; then
+                test_api_connection_mock
+            else
+                test_api_connection
+            fi
             ;;
         config)
             cmd_config "${@:2}"
