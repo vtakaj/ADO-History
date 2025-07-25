@@ -244,9 +244,19 @@ call_ado_api() {
     local auth_header="Authorization: Basic $(echo -n ":${AZURE_DEVOPS_PAT}" | base64 -w 0)"
     
     # API URL構築
-    local api_url="https://dev.azure.com/${AZURE_DEVOPS_ORG}/${endpoint}?api-version=${API_VERSION}"
+    local api_url="https://dev.azure.com/${AZURE_DEVOPS_ORG}/${endpoint}"
     
-    log_info "API呼び出し: $method $api_url"
+    # api-versionパラメータの追加（既存パラメータがある場合は&で結合）
+    if [[ "$endpoint" == *"?"* ]]; then
+        api_url="${api_url}&api-version=${API_VERSION}"
+    else
+        api_url="${api_url}?api-version=${API_VERSION}"
+    fi
+    
+    # ログ出力を標準エラーに送る（レスポンスの汚染防止）
+    {
+        log_info "API呼び出し: $method $api_url"
+    } >&2
     
     # curlオプション設定
     local curl_opts=(
@@ -284,7 +294,9 @@ call_ado_api() {
     local http_code
     
     while [[ $attempt -le $RETRY_COUNT ]]; do
-        log_info "試行 $attempt/$RETRY_COUNT"
+        {
+            log_info "試行 $attempt/$RETRY_COUNT"
+        } >&2
         
         # API呼び出し実行
         http_code=$(curl "${curl_opts[@]}" -o "$response_file" "$api_url" 2>/dev/null || echo "000")
@@ -498,27 +510,46 @@ fetch_workitems() {
     # データディレクトリ初期化
     init_data_directories
     
-    # 日付フィルタ計算
-    local changed_date=$(date -d "$days days ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -v-${days}d '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)
+    # 日付フィルタ計算（WIQL用に日付のみの形式）
+    local changed_date=$(date -d "$days days ago" '+%Y-%m-%d' 2>/dev/null || date -v-${days}d '+%Y-%m-%d' 2>/dev/null)
     
     # Work Items WIQL (Work Item Query Language) APIを使用
     local wiql_endpoint="${project}/_apis/wit/wiql"
     
     # WIQL クエリ（過去N日間のWork Items）
-    local wiql_query="SELECT [System.Id], [System.Title], [System.AssignedTo], [System.State], [System.ChangedDate] FROM WorkItems WHERE [System.TeamProject] = '$project' AND [System.ChangedDate] >= '$changed_date' ORDER BY [System.ChangedDate] DESC"
+    # プロジェクト内の全Work Itemsから日付フィルタで絞り込み
+    local wiql_query="SELECT [System.Id] FROM WorkItems WHERE [System.ChangedDate] >= '$changed_date' ORDER BY [System.ChangedDate] DESC"
     
     local wiql_data="{\"query\": \"$wiql_query\"}"
     
     log_info "WIQL クエリでWork Items IDsを取得中"
+    if [[ "$LOG_LEVEL" == "INFO" ]]; then
+        log_info "クエリ: $wiql_query"
+    fi
     
     # WIQLクエリでWork Item IDsを取得
     local wiql_response
     if wiql_response=$(call_ado_api "$wiql_endpoint" "POST" "$wiql_data"); then
         log_info "WIQL クエリ成功"
         
+        
+        # レスポンスからJSONの開始位置を見つける
+        local json_response
+        json_response=$(echo "$wiql_response" | grep -o '{.*}' | head -1)
+        
+        # JSONが有効かチェック
+        if ! echo "$json_response" | jq empty 2>/dev/null; then
+            log_error "無効なJSONレスポンスを受信しました"
+            log_error "元レスポンス: $(echo "$wiql_response" | head -c 500)..."
+            return 1
+        fi
+        
+        # 有効なJSONレスポンスを使用
+        wiql_response="$json_response"
+        
         # Work Item IDsを抽出
         local workitem_ids
-        workitem_ids=$(echo "$wiql_response" | jq -r '.workItems[]?.id' | tr '\n' ',' | sed 's/,$//')
+        workitem_ids=$(echo "$wiql_response" | jq -r '.workItems[]?.id' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
         
         if [[ -z "$workitem_ids" ]]; then
             log_info "指定条件のWork Itemsが見つかりませんでした"
@@ -561,13 +592,7 @@ fetch_workitems() {
                     if batch_response=$(call_ado_api "$batch_endpoint"); then
                         # Work Items情報を抽出
                         local workitems_batch
-                        workitems_batch=$(echo "$batch_response" | jq -r '.value[] | {
-                            id: .id,
-                            title: .fields["System.Title"] // "",
-                            assignedTo: (.fields["System.AssignedTo"].displayName // ""),
-                            state: .fields["System.State"] // "",
-                            lastModified: .fields["System.ChangedDate"] // ""
-                        }')
+                        workitems_batch=$(echo "$batch_response" | jq -c '.value[] | {id: .id, title: (.fields["System.Title"] // ""), assignedTo: ((.fields["System.AssignedTo"] // {}).displayName // ""), state: (.fields["System.State"] // ""), lastModified: (.fields["System.ChangedDate"] // "")}')
                         
                         if [[ -n "$workitems_batch" ]]; then
                             local batch_array
