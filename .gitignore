@@ -1,2 +1,4 @@
 .claude/get-api-key.sh
 **/.DS_Store
+
+.env

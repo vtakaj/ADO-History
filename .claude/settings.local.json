@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git pull:*)",
+      "Bash(git checkout:*)",
+      "Bash(chmod:*)",
+      "Bash(bash:*)",
+      "Bash(/workspace/test_ado_tracker.sh:*)",
+      "Bash(/workspace/test_config_advanced.sh:*)",
+      "Bash(rm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(find:*)",
+      "Bash(./test_ado_tracker.sh:*)",
+      "Bash(./test_api_functions.sh:*)",
+      "Bash(gh pr create:*)",
+      "Bash(./ado-tracker.sh config:*)",
+      "Bash(cp:*)",
+      "Bash(curl:*)",
+      "Bash(nslookup:*)",
+      "Bash(timeout:*)",
+      "Bash(./ado-tracker.sh test-connection:*)"
+    ],
+    "deny": []
+  }
+}
