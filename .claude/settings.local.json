@@ -26,7 +26,11 @@
       "Bash(LC_ALL=C ./test_workitems_fetch.sh)",
       "Bash(LC_ALL=C bash -n ./test_workitems_fetch.sh)",
       "Bash(source:*)",
-      "Bash(LC_ALL=C bash -c '\necho \"\"Testing basic functionality...\"\"\nmkdir -p ./test_data\necho \"\"✓ Directory creation works\"\"\n\necho \"\"{\\\"\"test\\\"\": \\\"\"data\\\"\"}\"\" | jq empty && echo \"\"✓ jq is available\"\"\n\necho \"\"Testing data functions...\"\"\nsource ./ado-tracker.sh\nDATA_DIR=\"\"./test_data\"\"\nBACKUP_DIR=\"\"./test_data/backup\"\"\nsave_json \"\"test.json\"\" \"\"{\\\"\"workitems\\\"\": []}\"\" && echo \"\"✓ JSON save works\"\"\nload_json \"\"test.json\"\" | jq \"\".workitems\"\" >/dev/null 2>&1 && echo \"\"✓ JSON load works\"\"\n\nrm -rf ./test_data\necho \"\"✓ All basic functionality tests passed\"\"\n')"
+      "Bash(LC_ALL=C bash -c '\necho \"\"Testing basic functionality...\"\"\nmkdir -p ./test_data\necho \"\"✓ Directory creation works\"\"\n\necho \"\"{\\\"\"test\\\"\": \\\"\"data\\\"\"}\"\" | jq empty && echo \"\"✓ jq is available\"\"\n\necho \"\"Testing data functions...\"\"\nsource ./ado-tracker.sh\nDATA_DIR=\"\"./test_data\"\"\nBACKUP_DIR=\"\"./test_data/backup\"\"\nsave_json \"\"test.json\"\" \"\"{\\\"\"workitems\\\"\": []}\"\" && echo \"\"✓ JSON save works\"\"\nload_json \"\"test.json\"\" | jq \"\".workitems\"\" >/dev/null 2>&1 && echo \"\"✓ JSON load works\"\"\n\nrm -rf ./test_data\necho \"\"✓ All basic functionality tests passed\"\"\n')",
+      "Bash(./test_status_history.sh:*)",
+      "Bash(TZ:*)",
+      "Bash(convert_to_jst \"2025-01-16T14:20:00Z\")",
+      "Bash(./ado-tracker.sh:*)"
     ],
     "deny": []
   }

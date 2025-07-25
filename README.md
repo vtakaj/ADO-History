@@ -55,7 +55,10 @@ cp .env.template .env
 ./ado-tracker.sh config template  # テンプレート生成
 
 # チケット履歴を取得
-./ado-tracker.sh fetch ProjectName 30  # 過去30日間のWork Itemsを取得
+./ado-tracker.sh fetch ProjectName 30  # 過去30日間のWork Itemsとステータス履歴を取得
+
+# ステータス変更履歴のみを取得
+./ado-tracker.sh status-history ProjectName  # 既存Work Itemsのステータス変更履歴を取得
 ```
 
 ## 機能詳細
@@ -85,6 +88,32 @@ cp .env.template .env
 ./ado-tracker.sh fetch MyProject 7
 ```
 
+### ステータス変更履歴取得 (status-history)
+
+各Work Itemのステータス変更履歴を取得し、日本時間で記録します。
+
+#### 取得される情報
+- Work Item ID
+- 変更日時（日本時間 JST）
+- 変更者情報
+- 変更前ステータス
+- 変更後ステータス
+- リビジョン番号
+
+#### データ保存
+- 取得されたデータは `./data/status_history.json` に保存されます
+- 既存データは `./data/backup/` に自動バックアップされます
+- 変更日時順でソートされます
+
+#### 使用例
+```bash
+# プロジェクト "MyProject" のステータス変更履歴を取得
+./ado-tracker.sh status-history MyProject
+
+# fetchコマンドでは自動的にステータス履歴も同時取得されます
+./ado-tracker.sh fetch MyProject 30
+```
+
 ## テスト実行
 
 ```bash
@@ -96,6 +125,9 @@ cp .env.template .env
 
 # Work Items取得機能テスト
 ./test_workitems_fetch.sh
+
+# ステータス変更履歴機能テスト
+./test_status_history.sh
 
 # 高度な設定テスト
 ./test_config_advanced.sh
