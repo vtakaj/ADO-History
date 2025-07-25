@@ -148,11 +148,12 @@ show_usage() {
 Usage: $SCRIPT_NAME <command> [options]
 
 Commands:
-  fetch <project> [days]     チケット履歴を取得
-  test-connection            API接続テストを実行
-  test-connection --mock     モック環境でAPI機能をテスト
+  fetch <project> [days]          チケット履歴とステータス変更履歴を取得
+  status-history <project>        ステータス変更履歴のみを取得
+  test-connection                 API接続テストを実行
+  test-connection --mock          モック環境でAPI機能をテスト
   config [show|validate|template] 設定管理
-  help                       このヘルプを表示
+  help                            このヘルプを表示
 
 Options:
   -h, --help                 ヘルプを表示
@@ -160,6 +161,7 @@ Options:
 
 Examples:
   $SCRIPT_NAME fetch MyProject 30
+  $SCRIPT_NAME status-history MyProject
   $SCRIPT_NAME test-connection
   $SCRIPT_NAME config show
   $SCRIPT_NAME config validate
@@ -240,9 +242,6 @@ call_ado_api() {
         return 1
     fi
     
-    # Base64エンコード用のPAT（空のユーザー名とPATの組み合わせ）
-    local auth_header="Authorization: Basic $(echo -n ":${AZURE_DEVOPS_PAT}" | base64 -w 0)"
-    
     # API URL構築
     local api_url="https://dev.azure.com/${AZURE_DEVOPS_ORG}/${endpoint}"
     
@@ -258,10 +257,12 @@ call_ado_api() {
         log_info "API呼び出し: $method $api_url"
     } >&2
     
+    # Base64エンコード用のPAT（空のユーザー名とPATの組み合わせ）
+    local auth_header="Authorization: Basic $(echo -n ":${AZURE_DEVOPS_PAT}" | base64 -w 0)"
+
     # curlオプション設定
     local curl_opts=(
         -s
-        -w "%{http_code}"
         -H "Content-Type: application/json"
         -H "$auth_header"
         -H "Accept: application/json"
@@ -299,14 +300,21 @@ call_ado_api() {
         } >&2
         
         # API呼び出し実行
-        http_code=$(curl "${curl_opts[@]}" -o "$response_file" "$api_url" 2>/dev/null || echo "000")
+        http_code=$(curl "${curl_opts[@]}" -o "$response_file" -w "%{http_code}" "$api_url" 2>/dev/null || echo "000")
         
         # HTTPステータスコード確認
         case "$http_code" in
             200|201|204)
                 # 成功
                 if [[ -s "$response_file" ]]; then
+                    {
+                        log_info "✓ API呼び出し成功 (HTTP $http_code) - レスポンスサイズ: $(wc -c < "$response_file") bytes"
+                    } >&2
                     cat "$response_file"
+                else
+                    {
+                        log_warn "API呼び出し成功だがレスポンスが空 (HTTP $http_code)"
+                    } >&2
                 fi
                 rm -f "$response_file"
                 return 0
@@ -337,6 +345,12 @@ call_ado_api() {
                 ;;
             *)
                 log_warn "予期しないHTTPステータスコード: $http_code。${RETRY_DELAY}秒後にリトライします"
+                # デバッグ用: レスポンス内容を表示
+                if [[ -s "$response_file" ]]; then
+                    {
+                        log_warn "レスポンス内容（最初の200文字）: $(head -c 200 "$response_file")"
+                    } >&2
+                fi
                 ;;
         esac
         
@@ -648,6 +662,213 @@ extract_workitem_info() {
         "ID: \(.id), Title: \(.title), Assignee: \(.assignedTo), State: \(.state), Modified: \(.lastModified)"'
 }
 
+# UTC to JST conversion
+convert_to_jst() {
+    local utc_time="$1"
+    
+    if [[ -z "$utc_time" ]]; then
+        echo ""
+        return
+    fi
+    
+    # Remove timezone info if present
+    local clean_time
+    clean_time=$(echo "$utc_time" | sed 's/\.[0-9]*Z$//' | sed 's/Z$//')
+    
+    # Convert to JST (add 9 hours) - try different methods based on OS
+    local jst_time=""
+    
+    # Method 1: GNU date (Linux) - using TZ environment variable
+    if jst_time=$(TZ=Asia/Tokyo date -d "$clean_time UTC" '+%Y-%m-%dT%H:%M:%S+09:00' 2>/dev/null); then
+        echo "$jst_time"
+        return 0
+    fi
+    
+    # Method 2: BSD date (macOS)
+    if jst_time=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$clean_time" -v+9H '+%Y-%m-%dT%H:%M:%S+09:00' 2>/dev/null); then
+        echo "$jst_time"
+        return 0
+    fi
+    
+    # Method 3: Parse manually and add 9 hours
+    if [[ "$clean_time" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})$ ]]; then
+        local year="${BASH_REMATCH[1]}"
+        local month="${BASH_REMATCH[2]}"
+        local day="${BASH_REMATCH[3]}"
+        local hour="${BASH_REMATCH[4]}"
+        local minute="${BASH_REMATCH[5]}"
+        local second="${BASH_REMATCH[6]}"
+        
+        # Convert to seconds since epoch and add 9 hours (32400 seconds)
+        local epoch_utc
+        if epoch_utc=$(date -d "$year-$month-$day $hour:$minute:$second UTC" +%s 2>/dev/null); then
+            local epoch_jst=$((epoch_utc + 32400))
+            local jst_formatted
+            if jst_formatted=$(date -d "@$epoch_jst" '+%Y-%m-%dT%H:%M:%S+09:00' 2>/dev/null); then
+                echo "$jst_formatted"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Fallback: return original with JST timezone
+    echo "${clean_time}+09:00"
+}
+
+# Get work item updates (US-001-BE-003)
+get_workitem_updates() {
+    local workitem_id="$1"
+    local project="$2"
+    
+    if [[ -z "$workitem_id" ]]; then
+        log_error "Work Item IDが指定されていません"
+        return 1
+    fi
+    
+    if [[ -z "$project" ]]; then
+        log_error "プロジェクト名が指定されていません"
+        return 1
+    fi
+    
+    local updates_endpoint="${project}/_apis/wit/workitems/${workitem_id}/updates"
+    
+    {
+        log_info "Work Item $workitem_id の更新履歴を取得中"
+    } >&2
+    
+    local updates_response
+    if updates_response=$(call_ado_api "$updates_endpoint"); then
+        echo "$updates_response"
+        return 0
+    else
+        log_error "Work Item $workitem_id の更新履歴取得に失敗"
+        return 1
+    fi
+}
+
+# Extract status changes from updates
+extract_status_changes() {
+    local updates_json="$1"
+    local workitem_id="$2"
+    
+    if [[ -z "$updates_json" ]]; then
+        log_error "更新履歴JSONが指定されていません"
+        return 1
+    fi
+    
+    if [[ -z "$workitem_id" ]]; then
+        log_error "Work Item IDが指定されていません"
+        return 1
+    fi
+    
+    # Extract status changes only
+    echo "$updates_json" | jq -c --arg workitem_id "$workitem_id" '
+        .value[] | 
+        select(.fields and (.fields["System.State"] or .fields["System.Status"])) |
+        {
+            workitemId: ($workitem_id | tonumber),
+            changeDate: .revisedDate,
+            changedBy: (.revisedBy.displayName // .revisedBy.uniqueName // "Unknown"),
+            previousStatus: (.fields["System.State"].oldValue // .fields["System.Status"].oldValue // null),
+            newStatus: (.fields["System.State"].newValue // .fields["System.Status"].newValue // ""),
+            revision: .rev
+        } |
+        # Only include actual status changes (exclude initial creation)
+        select(.previousStatus != null and .previousStatus != .newStatus)
+    ' 2>/dev/null || echo ""
+}
+
+# Fetch status history for all work items
+fetch_all_status_history() {
+    local project="$1"
+    
+    if [[ -z "$project" ]]; then
+        log_error "プロジェクト名が指定されていません"
+        return 1
+    fi
+    
+    log_info "全Work Itemsのステータス変更履歴取得を開始"
+    
+    # Load work items data
+    local workitems_data
+    workitems_data=$(load_json "workitems.json")
+    
+    if [[ -z "$workitems_data" ]] || [[ "$workitems_data" == "{}" ]]; then
+        log_error "Work Itemsデータが見つかりません。先にfetchコマンドを実行してください"
+        return 1
+    fi
+    
+    # Get work item IDs
+    local workitem_ids
+    workitem_ids=$(echo "$workitems_data" | jq -r '.workitems[].id' 2>/dev/null)
+    
+    if [[ -z "$workitem_ids" ]]; then
+        log_error "Work Item IDsが取得できませんでした"
+        return 1
+    fi
+    
+    local total_items
+    total_items=$(echo "$workitem_ids" | wc -l)
+    log_info "処理対象Work Items: $total_items件"
+    
+    local all_status_history='{"status_history": []}'
+    local processed_count=0
+    
+    while IFS= read -r workitem_id; do
+        if [[ -n "$workitem_id" ]]; then
+            ((processed_count++))
+            log_info "進捗: $processed_count/$total_items - Work Item $workitem_id の履歴取得中"
+            
+            # Get updates for this work item
+            local updates_response
+            if updates_response=$(get_workitem_updates "$workitem_id" "$project"); then
+                # Extract status changes
+                local status_changes
+                status_changes=$(extract_status_changes "$updates_response" "$workitem_id")
+                
+                if [[ -n "$status_changes" ]]; then
+                    # Process each status change and convert to JST
+                    while IFS= read -r change; do
+                        if [[ -n "$change" ]]; then
+                            # Convert changeDate to JST
+                            local jst_change
+                            local original_date
+                            original_date=$(echo "$change" | jq -r '.changeDate')
+                            local jst_date
+                            jst_date=$(convert_to_jst "$original_date")
+                            
+                            jst_change=$(echo "$change" | jq --arg jst_date "$jst_date" '.changeDate = $jst_date')
+                            
+                            # Add to all_status_history
+                            all_status_history=$(echo "$all_status_history" | jq --argjson change "$jst_change" '.status_history += [$change]')
+                        fi
+                    done <<< "$status_changes"
+                fi
+                
+                # Rate limiting - wait between requests
+                sleep 0.5
+            else
+                log_warn "Work Item $workitem_id の履歴取得をスキップ"
+            fi
+        fi
+    done <<< "$workitem_ids"
+    
+    # Sort status history by change date
+    all_status_history=$(echo "$all_status_history" | jq '.status_history |= sort_by(.changeDate)')
+    
+    # Save status history
+    if save_json "status_history.json" "$all_status_history"; then
+        local history_count
+        history_count=$(echo "$all_status_history" | jq '.status_history | length')
+        log_info "ステータス変更履歴取得完了: $history_count件"
+        log_info "保存先: $DATA_DIR/status_history.json"
+        return 0
+    else
+        log_error "ステータス変更履歴の保存に失敗しました"
+        return 1
+    fi
+}
+
 # コマンド実装
 cmd_fetch() {
     local project="${1:-}"
@@ -681,10 +902,63 @@ cmd_fetch() {
                 log_info "取得データのサンプル（最初の5件）:"
                 echo "$workitems_data" | jq -r '.workitems[0:5][] | 
                     "  - [\(.id)] \(.title) (\(.state)) - \(.assignedTo)"'
+                
+                # Automatically fetch status history after work items
+                log_info ""
+                log_info "ステータス変更履歴の取得を開始します..."
+                if fetch_all_status_history "$project"; then
+                    log_info "全データの取得が完了しました"
+                else
+                    log_warn "ステータス変更履歴の取得に失敗しましたが、Work Itemsの取得は成功しました"
+                fi
             fi
         fi
     else
         log_error "チケット履歴の取得に失敗しました"
+        exit 1
+    fi
+}
+
+# Status history command
+cmd_status_history() {
+    local project="${1:-}"
+    
+    # バリデーション
+    if [[ -z "$project" ]]; then
+        log_error "プロジェクト名を指定してください"
+        exit 1
+    fi
+    
+    validate_project_name "$project" || exit 1
+    
+    # 設定検証
+    if ! validate_config; then
+        log_error "設定が不正です。config validateコマンドで確認してください"
+        exit 2
+    fi
+    
+    # Status history取得実行
+    if fetch_all_status_history "$project"; then
+        log_info "ステータス変更履歴の取得が完了しました"
+        
+        # 取得データの概要表示
+        local status_data
+        status_data=$(load_json "status_history.json")
+        
+        if [[ -n "$status_data" ]]; then
+            local count
+            count=$(echo "$status_data" | jq '.status_history | length')
+            log_info "取得されたステータス変更履歴数: $count件"
+            
+            # 最初の5件を表示（サンプル）
+            if [[ "$count" -gt 0 ]]; then
+                log_info "取得データのサンプル（最初の5件）:"
+                echo "$status_data" | jq -r '.status_history[0:5][] | 
+                    "  - Work Item \(.workitemId): \(.previousStatus) → \(.newStatus) (\(.changeDate)) by \(.changedBy)"'
+            fi
+        fi
+    else
+        log_error "ステータス変更履歴の取得に失敗しました"
         exit 1
     fi
 }
@@ -699,6 +973,9 @@ main() {
     case "$command" in
         fetch)
             cmd_fetch "${@:2}"
+            ;;
+        status-history)
+            cmd_status_history "${@:2}"
             ;;
         test-connection)
             if [[ "${2:-}" == "--mock" ]]; then
