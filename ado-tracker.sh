@@ -148,8 +148,9 @@ show_usage() {
 Usage: $SCRIPT_NAME <command> [options]
 
 Commands:
-  fetch <project> [days]          チケット履歴とステータス変更履歴を取得
+  fetch <project> [days]          チケット履歴、ステータス変更履歴、詳細情報を取得
   status-history <project>        ステータス変更履歴のみを取得
+  fetch-details <project>         Work Item詳細情報のみを取得
   test-connection                 API接続テストを実行
   test-connection --mock          モック環境でAPI機能をテスト
   config [show|validate|template] 設定管理
@@ -162,6 +163,7 @@ Options:
 Examples:
   $SCRIPT_NAME fetch MyProject 30
   $SCRIPT_NAME status-history MyProject
+  $SCRIPT_NAME fetch-details MyProject
   $SCRIPT_NAME test-connection
   $SCRIPT_NAME config show
   $SCRIPT_NAME config validate
@@ -662,6 +664,237 @@ extract_workitem_info() {
         "ID: \(.id), Title: \(.title), Assignee: \(.assignedTo), State: \(.state), Modified: \(.lastModified)"'
 }
 
+# US-001-BE-004: Work Item詳細情報取得
+get_workitem_details() {
+    local workitem_id="$1"
+    local project="$2"
+    
+    if [[ -z "$workitem_id" ]]; then
+        log_error "Work Item IDが指定されていません"
+        return 1
+    fi
+    
+    if [[ -z "$project" ]]; then
+        log_error "プロジェクト名が指定されていません"
+        return 1
+    fi
+    
+    # Work Item Details API endpoint with field expansion
+    local details_endpoint="${project}/_apis/wit/workitems/${workitem_id}?\$expand=fields"
+    
+    {
+        log_info "Work Item $workitem_id の詳細情報を取得中"
+    } >&2
+    
+    local details_response
+    if details_response=$(call_ado_api "$details_endpoint"); then
+        echo "$details_response"
+        return 0
+    else
+        log_error "Work Item $workitem_id の詳細情報取得に失敗"
+        return 1
+    fi
+}
+
+# Work Item詳細情報の抽出とマージ
+merge_workitem_data() {
+    local basic_data="$1"
+    local details_response="$2"
+    local workitem_id="$3"
+    
+    if [[ -z "$basic_data" ]] || [[ -z "$details_response" ]] || [[ -z "$workitem_id" ]]; then
+        log_error "必要なパラメータが不足しています"
+        return 1
+    fi
+    
+    # 詳細情報を抽出し、JST変換を適用
+    local enhanced_data
+    enhanced_data=$(echo "$details_response" | jq -c --arg workitem_id "$workitem_id" '
+        {
+            id: (.id // ($workitem_id | tonumber)),
+            title: (.fields["System.Title"] // ""),
+            type: (.fields["System.WorkItemType"] // ""),
+            priority: (.fields["Microsoft.VSTS.Common.Priority"] // null),
+            createdDate: (.fields["System.CreatedDate"] // ""),
+            lastModifiedDate: (.fields["System.ChangedDate"] // ""),
+            originalEstimate: (.fields["Microsoft.VSTS.Scheduling.OriginalEstimate"] // null),
+            assignedTo: ((.fields["System.AssignedTo"] // {}).displayName // ""),
+            currentStatus: (.fields["System.State"] // ""),
+            description: (.fields["System.Description"] // "")
+        }
+    ')
+    
+    if [[ -n "$enhanced_data" ]]; then
+        # Convert dates to JST
+        local created_date_utc
+        created_date_utc=$(echo "$enhanced_data" | jq -r '.createdDate')
+        local created_date_jst
+        created_date_jst=$(convert_to_jst "$created_date_utc")
+        
+        local modified_date_utc
+        modified_date_utc=$(echo "$enhanced_data" | jq -r '.lastModifiedDate')
+        local modified_date_jst
+        modified_date_jst=$(convert_to_jst "$modified_date_utc")
+        
+        # Update with JST dates
+        enhanced_data=$(echo "$enhanced_data" | jq \
+            --arg created_jst "$created_date_jst" \
+            --arg modified_jst "$modified_date_jst" \
+            '.createdDate = $created_jst | .lastModifiedDate = $modified_jst')
+        
+        echo "$enhanced_data"
+        return 0
+    else
+        log_error "詳細情報の抽出に失敗しました"
+        return 1
+    fi
+}
+
+# 全Work Itemsの詳細情報取得 (バッチ処理最適化)
+fetch_all_details() {
+    local project="$1"
+    
+    if [[ -z "$project" ]]; then
+        log_error "プロジェクト名が指定されていません"
+        return 1
+    fi
+    
+    log_info "全Work Itemsの詳細情報取得を開始"
+    
+    # Load work items data
+    local workitems_data
+    workitems_data=$(load_json "workitems.json")
+    
+    if [[ -z "$workitems_data" ]] || [[ "$workitems_data" == "{}" ]]; then
+        log_error "Work Itemsデータが見つかりません。先にfetchコマンドを実行してください"
+        return 1
+    fi
+    
+    # Get work item IDs
+    local workitem_ids
+    workitem_ids=$(echo "$workitems_data" | jq -r '.workitems[].id' 2>/dev/null)
+    
+    if [[ -z "$workitem_ids" ]]; then
+        log_error "Work Item IDsが取得できませんでした"
+        return 1
+    fi
+    
+    local total_items
+    total_items=$(echo "$workitem_ids" | wc -l)
+    log_info "処理対象Work Items: $total_items件"
+    
+    local all_details='{"workitem_details": []}'
+    local processed_count=0
+    
+    # Process in batches for performance optimization
+    local batch_ids=""
+    local batch_count=0
+    
+    while IFS= read -r workitem_id; do
+        if [[ -n "$workitem_id" ]]; then
+            if [[ -n "$batch_ids" ]]; then
+                batch_ids="${batch_ids},${workitem_id}"
+            else
+                batch_ids="$workitem_id"
+            fi
+            ((batch_count++))
+            
+            # Process batch when batch size is reached or at the end
+            if [[ $batch_count -ge $BATCH_SIZE ]] || [[ $((processed_count + batch_count)) -eq $total_items ]]; then
+                log_info "詳細情報取得 (バッチ: $batch_count件, 進捗: $((processed_count + batch_count))/$total_items)"
+                
+                # Use batch API endpoint for better performance
+                local batch_endpoint="${project}/_apis/wit/workitems?ids=${batch_ids}&\$expand=fields"
+                
+                local batch_response
+                if batch_response=$(call_ado_api "$batch_endpoint"); then
+                    # Process each work item in the batch
+                    local details_batch
+                    details_batch=$(echo "$batch_response" | jq -c '.value[] | 
+                        {
+                            id: .id,
+                            title: (.fields["System.Title"] // ""),
+                            type: (.fields["System.WorkItemType"] // ""),
+                            priority: (.fields["Microsoft.VSTS.Common.Priority"] // null),
+                            createdDate: (.fields["System.CreatedDate"] // ""),
+                            lastModifiedDate: (.fields["System.ChangedDate"] // ""),
+                            originalEstimate: (.fields["Microsoft.VSTS.Scheduling.OriginalEstimate"] // null),
+                            assignedTo: ((.fields["System.AssignedTo"] // {}).displayName // ""),
+                            currentStatus: (.fields["System.State"] // ""),
+                            description: (.fields["System.Description"] // "")
+                        }')
+                    
+                    if [[ -n "$details_batch" ]]; then
+                        # Convert dates to JST for each item
+                        local jst_details=""
+                        while IFS= read -r detail; do
+                            if [[ -n "$detail" ]]; then
+                                # Convert dates to JST
+                                local created_date_utc
+                                created_date_utc=$(echo "$detail" | jq -r '.createdDate')
+                                local created_date_jst
+                                created_date_jst=$(convert_to_jst "$created_date_utc")
+                                
+                                local modified_date_utc
+                                modified_date_utc=$(echo "$detail" | jq -r '.lastModifiedDate')
+                                local modified_date_jst
+                                modified_date_jst=$(convert_to_jst "$modified_date_utc")
+                                
+                                # Update with JST dates
+                                local jst_detail
+                                jst_detail=$(echo "$detail" | jq \
+                                    --arg created_jst "$created_date_jst" \
+                                    --arg modified_jst "$modified_date_jst" \
+                                    '.createdDate = $created_jst | .lastModifiedDate = $modified_jst')
+                                
+                                if [[ -n "$jst_details" ]]; then
+                                    jst_details="${jst_details}
+${jst_detail}"
+                                else
+                                    jst_details="$jst_detail"
+                                fi
+                            fi
+                        done <<< "$details_batch"
+                        
+                        if [[ -n "$jst_details" ]]; then
+                            local batch_array
+                            batch_array=$(echo "$jst_details" | jq -s '.')
+                            
+                            all_details=$(echo "$all_details" | jq --argjson batch "$batch_array" '.workitem_details += $batch')
+                            
+                            processed_count=$((processed_count + batch_count))
+                            log_info "バッチ処理完了: $batch_count件 (累計: $processed_count件)"
+                        fi
+                    fi
+                    
+                    # Rate limiting - wait between batch requests
+                    sleep 0.5
+                else
+                    log_error "詳細情報取得に失敗: IDs=$batch_ids"
+                    # Continue with next batch instead of failing completely
+                    processed_count=$((processed_count + batch_count))
+                fi
+                
+                # Reset batch
+                batch_ids=""
+                batch_count=0
+            fi
+        fi
+    done <<< "$workitem_ids"
+    
+    # Save detailed work items data
+    if save_json "workitem_details.json" "$all_details"; then
+        local details_count
+        details_count=$(echo "$all_details" | jq '.workitem_details | length')
+        log_info "Work Item詳細情報取得完了: $details_count件"
+        log_info "保存先: $DATA_DIR/workitem_details.json"
+        return 0
+    else
+        log_error "Work Item詳細情報の保存に失敗しました"
+        return 1
+    fi
+}
+
 # UTC to JST conversion
 convert_to_jst() {
     local utc_time="$1"
@@ -907,7 +1140,16 @@ cmd_fetch() {
                 log_info ""
                 log_info "ステータス変更履歴の取得を開始します..."
                 if fetch_all_status_history "$project"; then
-                    log_info "全データの取得が完了しました"
+                    log_info "ステータス変更履歴の取得が完了しました"
+                    
+                    # Automatically fetch work item details after status history
+                    log_info ""
+                    log_info "Work Item詳細情報の取得を開始します..."
+                    if fetch_all_details "$project"; then
+                        log_info "全データの取得が完了しました"
+                    else
+                        log_warn "Work Item詳細情報の取得に失敗しましたが、基本データとステータス履歴の取得は成功しました"
+                    fi
                 else
                     log_warn "ステータス変更履歴の取得に失敗しましたが、Work Itemsの取得は成功しました"
                 fi
@@ -963,6 +1205,53 @@ cmd_status_history() {
     fi
 }
 
+# US-001-BE-004: Work Item details command
+cmd_fetch_details() {
+    local project="${1:-}"
+    
+    # バリデーション
+    if [[ -z "$project" ]]; then
+        log_error "プロジェクト名を指定してください"
+        exit 1
+    fi
+    
+    validate_project_name "$project" || exit 1
+    
+    # 設定検証
+    if ! validate_config; then
+        log_error "設定が不正です。config validateコマンドで確認してください"
+        exit 2
+    fi
+    
+    # Work Item details取得実行
+    if fetch_all_details "$project"; then
+        log_info "Work Item詳細情報の取得が完了しました"
+        
+        # 取得データの概要表示
+        local details_data
+        details_data=$(load_json "workitem_details.json")
+        
+        if [[ -n "$details_data" ]]; then
+            local count
+            count=$(echo "$details_data" | jq '.workitem_details | length')
+            log_info "取得されたWork Item詳細情報数: $count件"
+            
+            # 最初の3件を表示（サンプル）
+            if [[ "$count" -gt 0 ]]; then
+                log_info "取得データのサンプル（最初の3件）:"
+                echo "$details_data" | jq -r '.workitem_details[0:3][] | 
+                    "  - [\(.id)] \(.title) (\(.type))"
+                    + if .priority then " - 優先度: \(.priority)" else "" end
+                    + if .originalEstimate then " - 見積: \(.originalEstimate)h" else "" end
+                    + " - 作成: \(.createdDate) - 担当: \(.assignedTo)"'
+            fi
+        fi
+    else
+        log_error "Work Item詳細情報の取得に失敗しました"
+        exit 1
+    fi
+}
+
 # メイン処理
 main() {
     # .env ファイル読み込み
@@ -976,6 +1265,9 @@ main() {
             ;;
         status-history)
             cmd_status_history "${@:2}"
+            ;;
+        fetch-details)
+            cmd_fetch_details "${@:2}"
             ;;
         test-connection)
             if [[ "${2:-}" == "--mock" ]]; then
