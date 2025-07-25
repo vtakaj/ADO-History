@@ -242,9 +242,6 @@ call_ado_api() {
         return 1
     fi
     
-    # Base64エンコード用のPAT（空のユーザー名とPATの組み合わせ）
-    local auth_header="Authorization: Basic $(echo -n ":${AZURE_DEVOPS_PAT}" | base64 -w 0)"
-    
     # API URL構築
     local api_url="https://dev.azure.com/${AZURE_DEVOPS_ORG}/${endpoint}"
     
@@ -260,10 +257,12 @@ call_ado_api() {
         log_info "API呼び出し: $method $api_url"
     } >&2
     
+    # Base64エンコード用のPAT（空のユーザー名とPATの組み合わせ）
+    local auth_header="Authorization: Basic $(echo -n ":${AZURE_DEVOPS_PAT}" | base64 -w 0)"
+
     # curlオプション設定
     local curl_opts=(
         -s
-        -w "%{http_code}"
         -H "Content-Type: application/json"
         -H "$auth_header"
         -H "Accept: application/json"
@@ -301,14 +300,21 @@ call_ado_api() {
         } >&2
         
         # API呼び出し実行
-        http_code=$(curl "${curl_opts[@]}" -o "$response_file" "$api_url" 2>/dev/null || echo "000")
+        http_code=$(curl "${curl_opts[@]}" -o "$response_file" -w "%{http_code}" "$api_url" 2>/dev/null || echo "000")
         
         # HTTPステータスコード確認
         case "$http_code" in
             200|201|204)
                 # 成功
                 if [[ -s "$response_file" ]]; then
+                    {
+                        log_info "✓ API呼び出し成功 (HTTP $http_code) - レスポンスサイズ: $(wc -c < "$response_file") bytes"
+                    } >&2
                     cat "$response_file"
+                else
+                    {
+                        log_warn "API呼び出し成功だがレスポンスが空 (HTTP $http_code)"
+                    } >&2
                 fi
                 rm -f "$response_file"
                 return 0
@@ -339,6 +345,12 @@ call_ado_api() {
                 ;;
             *)
                 log_warn "予期しないHTTPステータスコード: $http_code。${RETRY_DELAY}秒後にリトライします"
+                # デバッグ用: レスポンス内容を表示
+                if [[ -s "$response_file" ]]; then
+                    {
+                        log_warn "レスポンス内容（最初の200文字）: $(head -c 200 "$response_file")"
+                    } >&2
+                fi
                 ;;
         esac
         
@@ -720,7 +732,9 @@ get_workitem_updates() {
     
     local updates_endpoint="${project}/_apis/wit/workitems/${workitem_id}/updates"
     
-    log_info "Work Item $workitem_id の更新履歴を取得中"
+    {
+        log_info "Work Item $workitem_id の更新履歴を取得中"
+    } >&2
     
     local updates_response
     if updates_response=$(call_ado_api "$updates_endpoint"); then
@@ -755,11 +769,12 @@ extract_status_changes() {
             workitemId: ($workitem_id | tonumber),
             changeDate: .revisedDate,
             changedBy: (.revisedBy.displayName // .revisedBy.uniqueName // "Unknown"),
-            previousStatus: (.fields["System.State"].oldValue // .fields["System.Status"].oldValue // ""),
+            previousStatus: (.fields["System.State"].oldValue // .fields["System.Status"].oldValue // null),
             newStatus: (.fields["System.State"].newValue // .fields["System.Status"].newValue // ""),
             revision: .rev
         } |
-        select(.previousStatus != .newStatus and (.previousStatus != "" or .newStatus != ""))
+        # Only include actual status changes (exclude initial creation)
+        select(.previousStatus != null and .previousStatus != .newStatus)
     ' 2>/dev/null || echo ""
 }
 
