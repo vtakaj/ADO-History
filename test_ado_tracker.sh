@@ -108,6 +108,23 @@ run_test_with_output "Fetch with invalid days" 1 "Error: 日数は1-365の範囲
 # Test 10: Fetch with valid arguments
 run_test_with_output "Fetch with valid arguments" 0 "fetch コマンドの実装予定地" "$SCRIPT_PATH" fetch TestProject 30
 
+# Configuration Management Tests
+
+# Test 11: Config show command
+run_test_with_output "Config show command" 0 "Azure DevOps Tracker 設定情報" "$SCRIPT_PATH" config show
+
+# Test 12: Config show (default)
+run_test_with_output "Config show (default)" 0 "Azure DevOps Tracker 設定情報" "$SCRIPT_PATH" config
+
+# Test 13: Config template generation
+run_test_with_output "Config template generation" 0 ".env.template を生成しました" "$SCRIPT_PATH" config template
+
+# Test 14: Config validate without PAT
+run_test_with_output "Config validate without PAT" 2 "AZURE_DEVOPS_PAT が設定されていません" "$SCRIPT_PATH" config validate
+
+# Test 15: Config invalid subcommand
+run_test_with_output "Config invalid subcommand" 1 "Usage: ado-tracker.sh config" "$SCRIPT_PATH" config invalid
+
 echo "=================================="
 echo "Test Summary:"
 echo "Total tests: $TEST_COUNT"
