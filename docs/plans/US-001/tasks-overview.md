@@ -20,7 +20,7 @@ As a システム I want Azure DevOps APIを使用してチケットのステー
 - `US-001-INF-003`: 設定管理と環境変数処理実装 ✅ **done**
 
 ### Frontend Tasks (1 task)
-- `US-001-FE-001`: コンソール出力フォーマット実装
+- `US-001-FE-001`: コンソール出力フォーマット実装 ✅ **done**
 
 ## Task Dependencies
 ```
