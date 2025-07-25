@@ -149,6 +149,7 @@ Usage: $SCRIPT_NAME <command> [options]
 
 Commands:
   fetch <project> [days]     チケット履歴を取得
+  test-connection            API接続テストを実行
   config [show|validate|template] 設定管理
   help                       このヘルプを表示
 
@@ -158,6 +159,7 @@ Options:
 
 Examples:
   $SCRIPT_NAME fetch MyProject 30
+  $SCRIPT_NAME test-connection
   $SCRIPT_NAME config show
   $SCRIPT_NAME config validate
   $SCRIPT_NAME config template
@@ -214,6 +216,182 @@ cmd_config() {
     esac
 }
 
+# Azure DevOps API 呼び出し
+call_ado_api() {
+    local endpoint="$1"
+    local method="${2:-GET}"
+    local data="${3:-}"
+    
+    if [[ -z "$endpoint" ]]; then
+        log_error "API エンドポイントが指定されていません"
+        return 1
+    fi
+    
+    # PAT検証
+    if [[ -z "$AZURE_DEVOPS_PAT" ]]; then
+        log_error "AZURE_DEVOPS_PAT が設定されていません"
+        return 1
+    fi
+    
+    # 組織名検証
+    if [[ -z "$AZURE_DEVOPS_ORG" ]]; then
+        log_error "AZURE_DEVOPS_ORG が設定されていません"
+        return 1
+    fi
+    
+    # Base64エンコード用のPAT（空のユーザー名とPATの組み合わせ）
+    local auth_header="Authorization: Basic $(echo -n ":${AZURE_DEVOPS_PAT}" | base64 -w 0)"
+    
+    # API URL構築
+    local api_url="https://dev.azure.com/${AZURE_DEVOPS_ORG}/${endpoint}?api-version=${API_VERSION}"
+    
+    log_info "API呼び出し: $method $api_url"
+    
+    # curlオプション設定
+    local curl_opts=(
+        -s
+        -w "%{http_code}"
+        -H "Content-Type: application/json"
+        -H "$auth_header"
+        -H "Accept: application/json"
+        --connect-timeout "$REQUEST_TIMEOUT"
+        --max-time "$((REQUEST_TIMEOUT * 2))"
+    )
+    
+    # HTTPメソッドに応じたオプション追加
+    case "$method" in
+        POST|PUT|PATCH)
+            if [[ -n "$data" ]]; then
+                curl_opts+=(-d "$data")
+            fi
+            curl_opts+=(-X "$method")
+            ;;
+        GET)
+            ;;
+        *)
+            log_error "サポートされていないHTTPメソッド: $method"
+            return 1
+            ;;
+    esac
+    
+    # レスポンス一時ファイル
+    local response_file
+    response_file=$(mktemp)
+    
+    # リトライ処理
+    local attempt=1
+    local http_code
+    
+    while [[ $attempt -le $RETRY_COUNT ]]; do
+        log_info "試行 $attempt/$RETRY_COUNT"
+        
+        # API呼び出し実行
+        http_code=$(curl "${curl_opts[@]}" -o "$response_file" "$api_url" 2>/dev/null || echo "000")
+        
+        # HTTPステータスコード確認
+        case "$http_code" in
+            200|201|204)
+                # 成功
+                if [[ -s "$response_file" ]]; then
+                    cat "$response_file"
+                fi
+                rm -f "$response_file"
+                return 0
+                ;;
+            401)
+                log_error "認証エラー: PATが無効または期限切れです (HTTP $http_code)"
+                rm -f "$response_file"
+                return 1
+                ;;
+            403)
+                log_error "アクセス拒否: 権限が不足しています (HTTP $http_code)"
+                rm -f "$response_file"
+                return 1
+                ;;
+            404)
+                log_error "リソースが見つかりません: $api_url (HTTP $http_code)"
+                rm -f "$response_file"
+                return 1
+                ;;
+            429)
+                log_warn "レート制限に達しました。${RETRY_DELAY}秒後にリトライします (HTTP $http_code)"
+                ;;
+            500|502|503|504)
+                log_warn "サーバーエラーが発生しました。${RETRY_DELAY}秒後にリトライします (HTTP $http_code)"
+                ;;
+            000)
+                log_warn "ネットワークエラーまたはタイムアウトです。${RETRY_DELAY}秒後にリトライします"
+                ;;
+            *)
+                log_warn "予期しないHTTPステータスコード: $http_code。${RETRY_DELAY}秒後にリトライします"
+                ;;
+        esac
+        
+        # 最後の試行でない場合はリトライ
+        if [[ $attempt -lt $RETRY_COUNT ]]; then
+            sleep "$RETRY_DELAY"
+            ((attempt++))
+        else
+            log_error "API呼び出しが失敗しました (HTTP $http_code)"
+            if [[ -s "$response_file" ]]; then
+                log_error "レスポンス: $(cat "$response_file")"
+            fi
+            rm -f "$response_file"
+            return 1
+        fi
+    done
+    
+    rm -f "$response_file"
+    return 1
+}
+
+# API接続テスト
+test_api_connection() {
+    log_info "Azure DevOps API接続テストを開始します"
+    
+    # 設定値検証
+    if ! validate_config; then
+        log_error "設定値が不正です"
+        return 1
+    fi
+    
+    log_info "組織: $AZURE_DEVOPS_ORG"
+    log_info "PAT: $(mask_pat "$AZURE_DEVOPS_PAT")"
+    log_info "APIバージョン: $API_VERSION"
+    
+    # プロジェクト一覧取得で接続テスト
+    local projects_endpoint="_apis/projects"
+    
+    log_info "プロジェクト一覧を取得して接続をテストします..."
+    
+    local response
+    if response=$(call_ado_api "$projects_endpoint"); then
+        # JSONレスポンスの簡易検証
+        if echo "$response" | grep -q '"value"' && echo "$response" | grep -q '"count"'; then
+            local project_count
+            project_count=$(echo "$response" | grep -o '"count":[0-9]*' | cut -d: -f2)
+            
+            log_info "✓ API接続テスト成功"
+            log_info "✓ 認証確認完了"
+            log_info "✓ 利用可能なプロジェクト数: $project_count"
+            
+            # プロジェクト一覧表示（デバッグ用）
+            if [[ "$LOG_LEVEL" == "INFO" ]] && command -v jq >/dev/null 2>&1; then
+                echo "$response" | jq -r '.value[] | "  - \(.name) (ID: \(.id))"' 2>/dev/null || true
+            fi
+            
+            return 0
+        else
+            log_error "レスポンス形式が期待される形式と異なります"
+            log_error "レスポンス: $response"
+            return 1
+        fi
+    else
+        log_error "API接続テストに失敗しました"
+        return 1
+    fi
+}
+
 # コマンド実装（後で実装される）
 cmd_fetch() {
     local project="${1:-}"
@@ -238,6 +416,9 @@ main() {
     case "$command" in
         fetch)
             cmd_fetch "${@:2}"
+            ;;
+        test-connection)
+            test_api_connection
             ;;
         config)
             cmd_config "${@:2}"
