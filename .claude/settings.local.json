@@ -37,7 +37,25 @@
       "Bash(./test_be004_simple.sh:*)",
       "Bash(./test_be005_error_handling.sh:*)",
       "Bash(ls:*)",
-      "Bash(./test_fe001_console_output.sh:*)"
+      "Bash(./test_fe001_console_output.sh:*)",
+      "Bash(./test_fe001_work_table.sh:*)",
+      "Bash(mkdir:*)",
+      "Bash(jq:*)",
+      "Bash(extract_assignees_from_history:*)",
+      "Bash(get_active_tickets_for_assignee_on_date \"小田 匠\" \"2025-06-04\")",
+      "Bash(/tmp/simple_test.sh:*)",
+      "Bash(/tmp/debug_tickets.sh:*)",
+      "Bash(/tmp/test_5057.sh)",
+      "Bash(/tmp/test_new_logic.sh:*)",
+      "Bash(/tmp/debug_step_by_step.sh:*)",
+      "Bash(/tmp/test_manual_function.sh:*)",
+      "Bash(/tmp/test_fixed_function.sh:*)",
+      "Bash(/tmp/simple_test_5057.sh:*)",
+      "Bash(/tmp/check_done_date.sh:*)",
+      "Bash(get_active_tickets_for_assignee_on_date \"小田 匠\" \"2025-06-05\")",
+      "Bash(/tmp/direct_test.sh:*)",
+      "Bash(/tmp/debug_jq_output.sh:*)",
+      "Bash(/tmp/simple_rewrite.sh:*)"
     ],
     "deny": []
   }
