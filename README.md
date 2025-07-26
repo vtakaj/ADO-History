@@ -107,13 +107,8 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 # Work Item詳細情報のみを取得
 ./ado-tracker.sh fetch-details ProjectName  # 既存Work Itemsの詳細情報を取得
 
-# データの表示
-./ado-tracker.sh display table            # 取得済みチケット一覧をテーブル形式で表示
-./ado-tracker.sh display list             # 取得済みチケット一覧をリスト形式で表示
-./ado-tracker.sh display summary          # 取得済みチケットの統計サマリーを表示
-
-# チケット履歴の表示
-./ado-tracker.sh history 12345            # 指定チケットのステータス変更履歴を表示
+# 作業記録テーブル生成（マークダウン）
+./ado-tracker.sh generate-work-table 2025-01 ./work_records/2025-01.md  # 月次作業記録テーブル生成
 ```
 
 ## 機能詳細
@@ -206,51 +201,45 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 ./ado-tracker.sh fetch MyProject 30 --with-details
 ```
 
-### コンソール出力機能 (display)
+### 作業記録テーブル生成 (generate-work-table)
 
-取得済みのチケット情報を見やすくコンソールに表示します。
-
-#### 表示形式
-
-- **table**: テーブル形式（ID、タイトル、担当者、ステータス）
-- **list**: リスト形式（1チケットずつ詳細表示）  
-- **summary**: 統計サマリー（総数、ステータス別内訳、担当者別内訳）
+取得済みのチケット情報とステータス履歴から、作業記録用のマークダウンテーブルを生成します。
 
 #### 機能
 
-- カラー出力対応（ステータス別に色分け）
-- 日本語文字幅の適切な処理
-- ページング機能（lessコマンド連携）
-- NO_COLOR環境変数でカラー無効化可能
+- **月次テーブル**: 指定月の日次作業記録テーブル
+- **担当者別列**: ステータス履歴から担当者を自動検出・列生成
+- **チケット番号表示**: Doing→Done期間中にチケット番号を自動表示
+- **Blocked制御**: Blocked状態時の表示制御（翌日から非表示、解除時に再表示）
+- **手入力対応**: 作業時間は後から手入力用（h:mm形式）
+- **月間合計**: フッターに月間トータル時間表示欄
+- **チケットリスト**: 月単位の対応チケット番号・タイトル一覧
 
-#### 使用例
+#### 出力形式
 
-```bash
-# テーブル形式で表示
-./ado-tracker.sh display table
+```markdown
+# 作業記録テーブル (2025-01)
 
-# リスト形式で表示  
-./ado-tracker.sh display list
+| 日付 | 曜日 | 田中太郎 | 作業内容 | 佐藤花子 | 作業内容 |
+|------|------|---------|----------|---------|----------|
+| 2025/01/10 | 金 | | 12345 | | |
+| 2025/01/12 | 日 | | | | 12346 |
+| **合計** | | **--:--** | | **--:--** | |
 
-# 統計サマリーを表示
-./ado-tracker.sh display summary
+## 対応チケット一覧 (2025年01月)
+
+- **12345**: Implement user authentication feature
+- **12346**: Fix login validation bug
 ```
 
-### ステータス履歴表示 (history)
-
-指定したチケットのステータス変更履歴を時系列で表示します。
-
-#### 表示内容
-
-- 変更日時（日本時間）
-- 変更者
-- ステータス変更（変更前 → 変更後）
-
 #### 使用例
 
 ```bash
-# チケット#12345の履歴を表示
-./ado-tracker.sh history 12345
+# 2025年1月の作業記録テーブルを生成
+./ado-tracker.sh generate-work-table 2025-01 ./work_records/2025-01.md
+
+# 2025年2月の作業記録テーブルを生成
+./ado-tracker.sh generate-work-table 2025-02 ./work_records/2025-02.md
 ```
 
 ## テスト実行
@@ -271,8 +260,8 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 # Work Item詳細情報機能テスト
 ./test_workitem_details.sh
 
-# コンソール出力機能テスト
-./test_fe001_console_output.sh
+# 作業記録テーブル生成機能テスト
+./test_fe001_work_table.sh
 
 # 高度な設定テスト
 ./test_config_advanced.sh

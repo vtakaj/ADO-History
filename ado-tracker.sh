@@ -168,8 +168,7 @@ Commands:
   fetch <project> [days] [--with-details]  チケット履歴とステータス変更履歴を取得
   status-history <project>                 ステータス変更履歴のみを取得
   fetch-details <project>                  Work Item詳細情報のみを取得
-  display [table|list|summary]             取得済みチケット一覧を表示
-  history <workitem_id>                    指定チケットのステータス履歴を表示
+  generate-work-table <YYYY-MM> <file>     月次作業記録テーブル（マークダウン）を生成
   test-connection                          API接続テストを実行
   test-connection --mock                   モック環境でAPI機能をテスト
   config [show|validate|template]          設定管理
@@ -185,9 +184,7 @@ Examples:
   $SCRIPT_NAME fetch MyProject 30 --with-details     # 詳細情報も含めて取得
   $SCRIPT_NAME status-history MyProject
   $SCRIPT_NAME fetch-details MyProject               # 詳細情報のみ取得
-  $SCRIPT_NAME display table                         # テーブル形式で表示
-  $SCRIPT_NAME display summary                       # サマリー形式で表示
-  $SCRIPT_NAME history 12345                         # チケット#12345の履歴表示
+  $SCRIPT_NAME generate-work-table 2025-01 ./work_records/2025-01.md  # 月次作業記録テーブル生成
   $SCRIPT_NAME test-connection
   $SCRIPT_NAME config show
   $SCRIPT_NAME config validate
@@ -1221,14 +1218,32 @@ extract_status_changes() {
         return 1
     fi
     
-    # Extract status changes only
+    # Extract status changes and calculate current assignee for each change
     echo "$updates_json" | jq -c --arg workitem_id "$workitem_id" '
+        # First, get all assignee changes with their dates
+        [.value[] | select(.fields."System.AssignedTo") | {
+            changeDate: (.fields["System.ChangedDate"].newValue // .revisedDate),
+            assignedTo: (.fields["System.AssignedTo"].newValue.displayName // .fields["System.AssignedTo"].newValue // ""),
+            revision: .rev
+        }] as $assignee_changes |
+        
+        # Function to get assignee at specific date
+        def get_assignee_at_date(date):
+            $assignee_changes | map(select(.changeDate <= date)) | sort_by(.changeDate) | 
+            if length > 0 then .[-1].assignedTo else "" end;
+        
+        # Process status changes and add current assignee
         .value[] | 
         select(.fields and (.fields["System.State"] or .fields["System.Status"])) |
+        
+        # Calculate current assignee at the time of this status change
+        ((.fields["System.ChangedDate"].newValue // .revisedDate)) as $change_date |
+        
         {
             workitemId: ($workitem_id | tonumber),
-            changeDate: .revisedDate,
+            changeDate: $change_date,
             changedBy: (.revisedBy.displayName // .revisedBy.uniqueName // "Unknown"),
+            assignedTo: get_assignee_at_date($change_date),
             previousStatus: (.fields["System.State"].oldValue // .fields["System.Status"].oldValue // null),
             newStatus: (.fields["System.State"].newValue // .fields["System.Status"].newValue // ""),
             revision: .rev
@@ -1545,231 +1560,301 @@ show_spinner() {
     printf "\r%*s\r" $((${#message} + 10)) ""  # クリア
 }
 
-# US-001-FE-001: チケット一覧表示
-display_workitems() {
-    local format="${1:-table}"
-    local workitems_file="$DATA_DIR/workitems.json"
+# US-001-FE-001: 月次作業記録テーブル生成
+generate_monthly_work_table() {
+    local year_month="$1"      # YYYY-MM形式
+    local output_file="$2"     # 出力ファイルパス
     
-    if [[ ! -f "$workitems_file" ]]; then
-        echo "${RED}エラー: チケットデータが見つかりません${RESET}" >&2
+    if [[ -z "$year_month" ]] || [[ -z "$output_file" ]]; then
+        log_error "年月（YYYY-MM）と出力ファイルパスを指定してください"
         return 1
     fi
-    
-    case "$format" in
-        table)
-            display_workitems_table "$workitems_file"
-            ;;
-        list)
-            display_workitems_list "$workitems_file"
-            ;;
-        summary)
-            display_workitems_summary "$workitems_file"
-            ;;
-        *)
-            log_error "サポートされていない表示形式: $format"
-            return 1
-            ;;
-    esac
-}
-
-# US-001-FE-001: テーブル形式表示
-display_workitems_table() {
-    local workitems_file="$1"
-    
-    printf "${BOLD}%-8s %-50s %-20s %-15s${RESET}\n" \
-        "ID" "タイトル" "担当者" "ステータス"
-    printf "%-8s %-50s %-20s %-15s\n" \
-        "--------" "$(printf '%.50s' "$(printf '%*s' 50 '' | tr ' ' '-')")" \
-        "$(printf '%.20s' "$(printf '%*s' 20 '' | tr ' ' '-')")" \
-        "$(printf '%.15s' "$(printf '%*s' 15 '' | tr ' ' '-')")"
-    
-    jq -r '.workitems[] | [.id, .title, .assignedTo, .state] | @tsv' "$workitems_file" | \
-    while IFS=$'\t' read -r id title assignedTo state; do
-        # 文字列切り詰め
-        title=$(printf '%.50s' "$title")
-        assignedTo=$(printf '%.20s' "$assignedTo")
-        
-        # ステータス別カラー
-        case "$state" in
-            "New"|"Proposed") color="$BLUE" ;;
-            "Active"|"In Progress") color="$YELLOW" ;;
-            "Resolved"|"Completed") color="$GREEN" ;;
-            "Closed"|"Done") color="$GREEN" ;;
-            *) color="$RESET" ;;
-        esac
-        
-        printf "%-8s %-50s %-20s ${color}%-15s${RESET}\n" \
-            "$id" "$title" "$assignedTo" "$state"
-    done
-}
-
-# US-001-FE-001: リスト形式表示
-display_workitems_list() {
-    local workitems_file="$1"
-    
-    jq -r '.workitems[] | [.id, .title, .assignedTo, .state] | @tsv' "$workitems_file" | \
-    while IFS=$'\t' read -r id title assignedTo state; do
-        # ステータス別カラー
-        case "$state" in
-            "New"|"Proposed") color="$BLUE" ;;
-            "Active"|"In Progress") color="$YELLOW" ;;
-            "Resolved"|"Completed") color="$GREEN" ;;
-            "Closed"|"Done") color="$GREEN" ;;
-            *) color="$RESET" ;;
-        esac
-        
-        echo "${BOLD}Work Item #${id}${RESET}"
-        echo "  タイトル: $title"
-        echo "  担当者: $assignedTo"
-        echo "  ステータス: ${color}${state}${RESET}"
-        echo
-    done
-}
-
-# US-001-FE-001: サマリー統計表示
-display_workitems_summary() {
-    local workitems_file="$1"
-    
-    echo "${BOLD}=== チケット統計 ===${RESET}"
-    echo
-    
-    # 総数
-    local total_count
-    total_count=$(jq '.workitems | length' "$workitems_file")
-    echo "総チケット数: ${BOLD}$total_count${RESET}"
-    echo
-    
-    # ステータス別統計
-    echo "${BOLD}ステータス別内訳:${RESET}"
-    jq -r '.workitems | group_by(.state) | .[] | "\(.[0].state): \(length)"' \
-        "$workitems_file" | \
-    while IFS=': ' read -r status count; do
-        case "$status" in
-            "New"|"Proposed") color="$BLUE" ;;
-            "Active"|"In Progress") color="$YELLOW" ;;
-            "Resolved"|"Completed"|"Closed"|"Done") color="$GREEN" ;;
-            *) color="$RESET" ;;
-        esac
-        printf "  ${color}%-15s: %3d${RESET}\n" "$status" "$count"
-    done
-    echo
-    
-    # 担当者別統計
-    echo "${BOLD}担当者別内訳 (上位5名):${RESET}"
-    jq -r '.workitems | group_by(.assignedTo) | 
-           sort_by(length) | reverse | 
-           .[0:5] | .[] | "\(.[0].assignedTo): \(length)"' \
-        "$workitems_file" | \
-    while IFS=': ' read -r assignee count; do
-        printf "  %-30s: %3d\n" "$assignee" "$count"
-    done
-}
-
-# US-001-FE-001: ステータス履歴表示
-display_status_history() {
-    local workitem_id="$1"
-    local history_file="$DATA_DIR/status_history.json"
-    
-    if [[ ! -f "$history_file" ]]; then
-        echo "${RED}エラー: ステータス履歴データが見つかりません${RESET}" >&2
-        return 1
-    fi
-    
-    echo "${BOLD}=== チケット #${workitem_id} ステータス履歴 ===${RESET}"
-    echo
-    
-    jq -r --arg id "$workitem_id" \
-        '.status_history[] | select(.workitemId == ($id | tonumber)) | 
-         [.changeDate, .changedBy, .previousStatus, .newStatus] | @tsv' \
-        "$history_file" | \
-    while IFS=$'\t' read -r changeDate changedBy previousStatus newStatus; do
-        # 日時フォーマット
-        local formatted_date
-        formatted_date=$(date -d "$changeDate" '+%Y-%m-%d %H:%M' 2>/dev/null || \
-                        date -j -f "%Y-%m-%dT%H:%M:%S" "${changeDate%+*}" '+%Y-%m-%d %H:%M' 2>/dev/null || \
-                        echo "$changeDate")
-        
-        printf "${BLUE}%s${RESET} ${BOLD}%s${RESET}\n" "$formatted_date" "$changedBy"
-        printf "  %s → ${GREEN}%s${RESET}\n" "$previousStatus" "$newStatus"
-        echo
-    done
-}
-
-# US-001-FE-001: ページング対応出力
-paginated_output() {
-    local content="$1"
-    
-    if [[ -t 1 ]] && command -v "$PAGER" >/dev/null; then
-        echo "$content" | $PAGER
-    else
-        echo "$content"
-    fi
-}
-
-# US-001-FE-001: display コマンド実装
-cmd_display() {
-    local format="${1:-table}"
-    
-    # フォーマット検証
-    case "$format" in
-        table|list|summary)
-            ;;
-        *)
-            echo "Error: サポートされていない表示形式: $format" >&2
-            echo "サポート形式: table, list, summary" >&2
-            exit 1
-            ;;
-    esac
     
     # データファイル存在確認
-    if [[ ! -f "$DATA_DIR/workitems.json" ]]; then
-        echo "${RED}エラー: チケットデータが見つかりません${RESET}" >&2
+    if [[ ! -f "$DATA_DIR/workitems.json" ]] || [[ ! -f "$DATA_DIR/status_history.json" ]]; then
+        log_error "チケットデータまたはステータス履歴データが見つかりません"
+        return 1
+    fi
+    
+    log_info "月次作業記録テーブルを生成中: $year_month"
+    
+    # 出力ディレクトリ作成
+    mkdir -p "$(dirname "$output_file")"
+    
+    # ステータス履歴から担当者を抽出
+    local assignees
+    assignees=$(extract_assignees_from_history "$year_month")
+    
+    if [[ -z "$assignees" ]]; then
+        log_warn "指定月($year_month)にステータス変更履歴が見つかりません"
+        echo "# 作業記録テーブル ($year_month)" > "$output_file"
+        echo "" >> "$output_file"
+        echo "指定月にステータス変更履歴がありません。" >> "$output_file"
+        return 0
+    fi
+    
+    # テーブル生成
+    {
+        echo "# 作業記録テーブル ($year_month)"
+        echo ""
+        generate_table_header "$assignees"
+        
+        # 月の各日についてテーブル行を生成
+        local start_date="${year_month}-01"
+        local end_date
+        end_date=$(get_last_day_of_month "$year_month")
+        
+        # 月の日数を計算
+        local year="${year_month%-*}"
+        local month="${year_month#*-}"
+        local days_in_month
+        days_in_month=$(date -d "${year}-${month}-01 + 1 month - 1 day" '+%d' 2>/dev/null || \
+                       date -j -v+1m -v-1d -f "%Y-%m-%d" "${year}-${month}-01" '+%d' 2>/dev/null)
+        
+        # 各日のテーブル行を生成
+        for ((day=1; day<=days_in_month; day++)); do
+            local current_date
+            printf -v current_date "%s-%02d" "$year_month" "$day"
+            generate_table_row "$current_date" "$assignees"
+        done
+        
+        # フッター（月間合計）生成
+        generate_table_footer "$assignees"
+        
+        # チケットリスト生成
+        generate_ticket_list "$year_month"
+        
+    } > "$output_file"
+    
+    log_info "作業記録テーブル生成完了: $output_file"
+}
+
+# US-001-FE-001: 担当者抽出
+extract_assignees_from_history() {
+    local year_month="$1"
+    
+    # status_historyのassignedToフィールドから担当者を取得
+    jq -r --arg year_month "$year_month" '
+        .status_history[] |
+        select(.changeDate | startswith($year_month)) |
+        select(.assignedTo != null and .assignedTo != "") |
+        .assignedTo
+    ' "$DATA_DIR/status_history.json" | sort -u | tr '\n' ';' | sed 's/;$//'
+}
+
+# US-001-FE-001: テーブルヘッダー生成
+generate_table_header() {
+    local assignees_str="$1"
+    local assignees
+    IFS=';' read -ra assignees <<< "$assignees_str"
+    
+    echo -n "| 日付 | 曜日 |"
+    for assignee in "${assignees[@]}"; do
+        echo -n " ${assignee} | 作業内容 |"
+    done
+    echo
+    
+    echo -n "|------|------|"
+    for assignee in "${assignees[@]}"; do
+        echo -n "---------|----------|"
+    done
+    echo
+}
+
+# US-001-FE-001: テーブル行生成
+generate_table_row() {
+    local date="$1"
+    local assignees_str="$2"
+    local assignees
+    IFS=';' read -ra assignees <<< "$assignees_str"
+    
+    local formatted_date
+    formatted_date=$(date -d "$date" '+%Y/%m/%d' 2>/dev/null || \
+                    date -j -f "%Y-%m-%d" "$date" '+%Y/%m/%d' 2>/dev/null)
+    local day_of_week
+    day_of_week=$(date -d "$date" '+%u' 2>/dev/null || \
+                  date -j -f "%Y-%m-%d" "$date" '+%u' 2>/dev/null)
+    local japanese_dow
+    japanese_dow=$(get_japanese_day_of_week "$day_of_week")
+    
+    echo -n "| $formatted_date | $japanese_dow |"
+    
+    for assignee in "${assignees[@]}"; do
+        local work_content=""
+        local active_tickets
+        active_tickets=$(get_active_tickets_for_assignee_on_date "$assignee" "$date")
+        
+        if [[ -n "$active_tickets" ]]; then
+            work_content="$active_tickets"
+        fi
+        
+        echo -n " | $work_content |"
+    done
+    echo
+}
+
+# US-001-FE-001: 指定日の担当者の稼働チケット取得
+get_active_tickets_for_assignee_on_date() {
+    local assignee="$1"
+    local date="$2"
+    
+    if [[ ! -f "$DATA_DIR/status_history.json" ]] || [[ ! -f "$DATA_DIR/workitems.json" ]]; then
+        return 0
+    fi
+    
+    # status_historyのassignedToフィールドを使用して正確な担当者判定
+    jq -r --arg assignee "$assignee" --arg target_date "$date" '
+        .status_history | group_by(.workitemId) |
+        .[] |
+        select(.[0].workitemId) as $ticket_group |
+        map(select(.changeDate <= ($target_date + "T23:59:59+09:00"))) | sort_by(.changeDate) |
+        if length > 0 then
+            .[-1] |
+            if (.assignedTo == $assignee and (.newStatus == "Doing" or .newStatus == "Code Review" or .newStatus == "Active")) then
+                # 指定月より前に完了チェック
+                ($ticket_group | map(select(.newStatus == "Done" or .newStatus == "Completed")) | sort_by(.changeDate)) as $done_history |
+                if ($done_history | length > 0) then
+                    ($done_history[0].changeDate[0:7]) as $done_month |
+                    ($target_date[0:7]) as $target_month |
+                    if ($done_month < $target_month) then
+                        empty
+                    else
+                        .workitemId
+                    end
+                else
+                    .workitemId
+                end
+            elif (.assignedTo == $assignee and .newStatus == "Done") then
+                # Done当日のみ表示（Done変更が指定日に発生した場合のみ）
+                if (.changeDate[0:10] == $target_date) then
+                    .workitemId
+                else
+                    empty  
+                end
+            else
+                empty
+            end
+        else
+            empty
+        end
+    ' "$DATA_DIR/status_history.json" 2>/dev/null | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+
+# US-001-FE-001: 日本語曜日取得
+get_japanese_day_of_week() {
+    local dow="$1"  # 1=月曜日, 7=日曜日
+    
+    case "$dow" in
+        1) echo "月" ;;
+        2) echo "火" ;;
+        3) echo "水" ;;
+        4) echo "木" ;;
+        5) echo "金" ;;
+        6) echo "土" ;;
+        7) echo "日" ;;
+        *) echo "$dow" ;;
+    esac
+}
+
+# US-001-FE-001: 月末日取得
+get_last_day_of_month() {
+    local year_month="$1"  # YYYY-MM
+    date -d "${year_month}-01 + 1 month - 1 day" '+%Y-%m-%d' 2>/dev/null || \
+    date -j -v+1m -v-1d -f "%Y-%m-%d" "${year_month}-01" '+%Y-%m-%d' 2>/dev/null
+}
+
+# US-001-FE-001: テーブルフッター生成
+generate_table_footer() {
+    local assignees_str="$1"
+    local assignees
+    IFS=';' read -ra assignees <<< "$assignees_str"
+    
+    echo -n "| **合計** | |"
+    for assignee in "${assignees[@]}"; do
+        echo -n " **--:--** | |"
+    done
+    echo
+}
+
+# US-001-FE-001: 月単位のチケットリスト生成
+generate_ticket_list() {
+    local year_month="$1"
+    
+    echo
+    echo "## 対応チケット一覧 (${year_month//-/年}月)"
+    echo
+    
+    # 指定月にステータス変更があったチケットを取得
+    local tickets
+    tickets=$(jq -r --arg year_month "$year_month" '
+        .status_history[] |
+        select(.changeDate | startswith($year_month)) |
+        .workitemId
+    ' "$DATA_DIR/status_history.json" 2>/dev/null | sort -u)
+    
+    if [[ -z "$tickets" ]]; then
+        echo "該当するチケットがありません。"
+        return 0
+    fi
+    
+    # 各チケットの情報を取得して表示
+    echo "$tickets" | while read -r ticket_id; do
+        if [[ -n "$ticket_id" ]]; then
+            local ticket_info
+            ticket_info=$(jq -r --arg id "$ticket_id" '
+                .workitems[] |
+                select(.id == ($id | tonumber)) |
+                "- **\(.id)**: \(.title)"
+            ' "$DATA_DIR/workitems.json" 2>/dev/null)
+            
+            if [[ -n "$ticket_info" ]]; then
+                echo "$ticket_info"
+            else
+                echo "- **$ticket_id**: (タイトル情報なし)"
+            fi
+        fi
+    done
+}
+
+# US-001-FE-001: 作業記録テーブル生成コマンド実装
+cmd_generate_work_table() {
+    local year_month="${1:-}"
+    local output_file="${2:-}"
+    
+    # 引数検証
+    if [[ -z "$year_month" ]]; then
+        echo "Error: 年月（YYYY-MM形式）を指定してください" >&2
+        echo "使用例: $SCRIPT_NAME generate-work-table 2025-01 ./work_records/2025-01.md" >&2
+        exit 1
+    fi
+    
+    if [[ -z "$output_file" ]]; then
+        echo "Error: 出力ファイルパスを指定してください" >&2
+        echo "使用例: $SCRIPT_NAME generate-work-table 2025-01 ./work_records/2025-01.md" >&2
+        exit 1
+    fi
+    
+    # 年月形式検証
+    if [[ ! "$year_month" =~ ^[0-9]{4}-[0-9]{2}$ ]]; then
+        echo "Error: 年月はYYYY-MM形式で指定してください（例: 2025-01）" >&2
+        exit 1
+    fi
+    
+    # データファイル存在確認
+    if [[ ! -f "$DATA_DIR/workitems.json" ]] || [[ ! -f "$DATA_DIR/status_history.json" ]]; then
+        echo "${RED}エラー: チケットデータまたはステータス履歴データが見つかりません${RESET}" >&2
         echo "先に fetch コマンドでデータを取得してください" >&2
         exit 1
     fi
     
-    log_info "チケット一覧を $format 形式で表示します"
+    log_info "作業記録テーブルを生成します: $year_month → $output_file"
     
-    # 表示実行
-    local output
-    if output=$(display_workitems "$format"); then
-        paginated_output "$output"
+    # テーブル生成実行
+    if generate_monthly_work_table "$year_month" "$output_file"; then
+        log_info "作業記録テーブルの生成が完了しました: $output_file"
+        echo "${GREEN}✓${RESET} 作業記録テーブル: $output_file"
     else
-        log_error "チケット一覧の表示に失敗しました"
-        exit 1
-    fi
-}
-
-# US-001-FE-001: history コマンド実装
-cmd_history() {
-    local workitem_id="${1:-}"
-    
-    # Work Item ID検証
-    if [[ -z "$workitem_id" ]]; then
-        echo "Error: Work Item IDを指定してください" >&2
-        exit 1
-    fi
-    
-    if [[ ! "$workitem_id" =~ ^[0-9]+$ ]]; then
-        echo "Error: Work Item IDは数値で指定してください" >&2
-        exit 1
-    fi
-    
-    # データファイル存在確認
-    if [[ ! -f "$DATA_DIR/status_history.json" ]]; then
-        echo "${RED}エラー: ステータス履歴データが見つかりません${RESET}" >&2
-        echo "先に fetch または status-history コマンドでデータを取得してください" >&2
-        exit 1
-    fi
-    
-    log_info "Work Item #$workitem_id のステータス履歴を表示します"
-    
-    # 履歴表示実行
-    local output
-    if output=$(display_status_history "$workitem_id"); then
-        paginated_output "$output"
-    else
-        log_error "ステータス履歴の表示に失敗しました"
+        log_error "作業記録テーブルの生成に失敗しました"
         exit 1
     fi
 }
@@ -1794,11 +1879,8 @@ main() {
         fetch-details)
             cmd_fetch_details "${@:2}"
             ;;
-        display)
-            cmd_display "${@:2}"
-            ;;
-        history)
-            cmd_history "${@:2}"
+        generate-work-table)
+            cmd_generate_work_table "${@:2}"
             ;;
         test-connection)
             if [[ "${2:-}" == "--mock" ]]; then
