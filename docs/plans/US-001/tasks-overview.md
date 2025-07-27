@@ -22,6 +22,9 @@ As a システム I want Azure DevOps APIを使用してチケットのステー
 ### Frontend Tasks (1 task)
 - `US-001-FE-001`: コンソール出力フォーマット実装 ✅ **done**
 
+### Refactoring Tasks (1 task)
+- `US-001-RF-001`: コードベース構造とテストファイル整理リファクタリング ✅ **done**
+
 ## Task Dependencies
 ```
 US-001-INF-001 (基本構造)
