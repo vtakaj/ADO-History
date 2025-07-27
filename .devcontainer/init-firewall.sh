@@ -59,6 +59,8 @@ for domain in \
     "pypi.org"\
     "files.pythonhosted.org"\
     "statsig.com"\
+    "mcp.context7.com"\
+    "marketplace.cursorapi.com"\
     "dev.azure.com"; do
     echo "Resolving $domain..."
     ips=$(dig +short A "$domain")

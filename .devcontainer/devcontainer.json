@@ -15,7 +15,8 @@
       "extensions": [
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "eamodio.gitlens"
+        "eamodio.gitlens",
+        "marp-team.marp-vscode"
       ],
       "settings": {
         "editor.formatOnSave": true,
