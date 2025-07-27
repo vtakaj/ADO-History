@@ -35,13 +35,14 @@ US-001-INF-001 (基本構造)
 │   └── US-001-BE-004 (詳細取得)
 ├── US-001-BE-005 (エラーハンドリング)
 ├── US-001-INF-002 (データ管理)
-└── US-001-FE-001 (出力)
+├── US-001-FE-001 (出力)
+└── US-001-RF-001 (リファクタリング) ← 全タスク完了後に実施
 ```
 
 ## Estimated Timeline
-- **Total Effort**: 18-24 hours
-- **Task Size**: 2-3 hours per task
-- **Completion Target**: 3 days
+- **Total Effort**: 26-32 hours (リファクタリング含む)
+- **Task Size**: 2-3 hours per task (リファクタリングは8-12時間)
+- **Completion Target**: 4-5 days
 
 ## Acceptance Criteria Mapping
 - API接続 → US-001-BE-001
