@@ -55,7 +55,10 @@
       "Bash(get_active_tickets_for_assignee_on_date \"小田 匠\" \"2025-06-05\")",
       "Bash(/tmp/direct_test.sh:*)",
       "Bash(/tmp/debug_jq_output.sh:*)",
-      "Bash(/tmp/simple_rewrite.sh:*)"
+      "Bash(/tmp/simple_rewrite.sh:*)",
+      "Bash(mv:*)",
+      "Bash(./ado-tracker-modular.sh:*)",
+      "Bash(tests/integration/test_main.sh:*)"
     ],
     "deny": []
   }
