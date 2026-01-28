@@ -45,7 +45,6 @@ call_ado_api() {
     # curlオプション設定（Enhanced with header capture for Retry-After）
     local curl_opts=(
         -s
-        -D -    # Include response headers for Retry-After parsing
         -H "Content-Type: application/json"
         -H "$auth_header"
         -H "Accept: application/json"
@@ -70,10 +69,11 @@ call_ado_api() {
     esac
     
     # レスポンス一時ファイル
-    local response_file
-    response_file=$(mktemp)
     local headers_file
     headers_file=$(mktemp)
+    local response_file
+    response_file=$(mktemp)
+    curl_opts+=(-D "$headers_file")
     
     # リトライ処理（指数バックオフ）
     local attempt=1
@@ -88,11 +88,13 @@ call_ado_api() {
         # API呼び出し実行
         local curl_output
         curl_output=$(curl "${curl_opts[@]}" -o "$response_file" -w "%{http_code}" "$api_url" 2>/dev/null)
-        http_code=$(echo "$curl_output" | tail -1)
+        http_code="$curl_output"
         
         # Extract headers and body
-        local headers
-        headers=$(echo "$curl_output" | head -n -1)
+        local headers=""
+        if [[ -s "$headers_file" ]]; then
+            headers=$(cat "$headers_file")
+        fi
         
         # HTTPステータスコード確認（Enhanced with US-001-BE-005 error handling）
         case "$http_code" in

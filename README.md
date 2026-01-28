@@ -6,6 +6,18 @@ Azure DevOpsからチケット履歴を抽出するツール
 
 Azure DevOps Tracker を使用する前に、接続設定を行います。
 
+### セキュリティ（APIキー）
+
+誤ってAPIキーをコミットしてしまった場合は、すぐに**無効化（ローテーション）**してください。
+
+最低限の対応手順:
+1. OpenAI のダッシュボードで該当キーを**無効化**（Revoke/Rotate）
+2. リポジトリから**平文キーを削除**（ファイル削除 or 置き換え）
+3. 既にリモートへpush済みなら、**履歴からも削除**（BFG/フィルタでの除去）
+4. 新しいキーを作成し、環境変数で管理（`OPENAI_API_KEY` など）
+
+※ 鍵の漏洩が疑われる場合は、優先度高で対応してください。
+
 ### 設定テンプレート生成
 
 ```bash
@@ -23,6 +35,24 @@ cp .env.template .env
 ./ado-tracker.sh config validate
 ```
 
+### Codex 認証方法
+
+Codex CLI と VS Code 拡張は、以下のどちらかで認証します。
+
+1) ChatGPT サインイン（推奨）
+- `codex --login` を実行してサインイン
+- 認証情報はユーザーディレクトリに保存されます（devcontainer では `~/.codex` をマウント推奨）
+
+2) APIキー
+- 環境変数 `OPENAI_API_KEY` を設定
+- devcontainer 利用時は、`devcontainer.json` の `remoteEnv` でホスト環境変数を引き継ぐと便利です
+
+```json
+"remoteEnv": {
+  "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}"
+}
+```
+
 ### 環境変数
 
 以下の環境変数が必要です：
@@ -30,9 +60,9 @@ cp .env.template .env
 #### 必須設定
 - `AZURE_DEVOPS_PAT`: Personal Access Token（必須）
 - `AZURE_DEVOPS_ORG`: 組織名（必須）
+- `AZURE_DEVOPS_PROJECT`: デフォルトプロジェクト名（fetch コマンドで使用）
 
 #### オプション設定
-- `AZURE_DEVOPS_PROJECT`: プロジェクト名（実行時指定も可）
 - `API_VERSION`: Azure DevOps API バージョン（デフォルト: 7.2）
 - `LOG_LEVEL`: ログレベル - INFO|WARN|ERROR（デフォルト: INFO）
 - `RETRY_COUNT`: API呼び出しリトライ回数（デフォルト: 3）
@@ -95,21 +125,41 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 ./ado-tracker.sh config validate  # 設定検証
 ./ado-tracker.sh config template  # テンプレート生成
 
-# チケット履歴を取得
-./ado-tracker.sh fetch ProjectName 30  # 過去30日間のWork Itemsとステータス履歴を取得
+# チケット履歴を取得（AZURE_DEVOPS_PROJECT に設定されたデフォルトプロジェクトを使用）
+./ado-tracker.sh fetch 30              # デフォルトプロジェクトで過去30日間を取得
 
-# 詳細情報も含めて取得
-./ado-tracker.sh fetch ProjectName 30 --with-details  # 詳細情報も含めて包括的に取得
+# 詳細情報も含めて取得（デフォルトプロジェクト）
+./ado-tracker.sh fetch 30 --with-details  # 詳細情報も含めて包括的に取得
 
 # ステータス変更履歴のみを取得
 ./ado-tracker.sh status-history ProjectName  # 既存Work Itemsのステータス変更履歴を取得
+./ado-tracker.sh status-history              # 既定プロジェクトで取得
 
 # Work Item詳細情報のみを取得
 ./ado-tracker.sh fetch-details ProjectName  # 既存Work Itemsの詳細情報を取得
+./ado-tracker.sh fetch-details              # 既定プロジェクトで取得
 
 # 作業記録テーブル生成（マークダウン）
 ./ado-tracker.sh generate-work-table 2025-01 ./work_records/2025-01.md  # 月次作業記録テーブル生成
 ```
+
+## テスト
+
+```bash
+# 結合テスト
+./tests/integration/test_main.sh
+./tests/integration/test_work_table.sh
+./tests/integration/test_error_scenarios.sh
+./tests/integration/test_fetch_flow.sh
+
+# 単体テスト
+./tests/unit/test_api.sh
+./tests/unit/test_config.sh
+./tests/unit/test_data.sh
+./tests/unit/test_output.sh
+```
+
+※ テストはモック API を使用するため、実際の Azure DevOps 接続は不要です。
 
 ## 機能詳細
 
@@ -135,14 +185,14 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 
 #### 使用例
 ```bash
-# プロジェクト "MyProject" の過去30日間の基本データを取得
-./ado-tracker.sh fetch MyProject 30
+# デフォルトプロジェクトの過去30日間の基本データを取得
+./ado-tracker.sh fetch 30
 
 # 詳細情報も含めて包括的に取得
-./ado-tracker.sh fetch MyProject 30 --with-details
+./ado-tracker.sh fetch 30 --with-details
 
 # 過去7日間の基本データを取得
-./ado-tracker.sh fetch MyProject 7
+./ado-tracker.sh fetch 7
 ```
 
 ### ステータス変更履歴取得 (status-history)
@@ -164,11 +214,11 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 
 #### 使用例
 ```bash
-# プロジェクト "MyProject" のステータス変更履歴を取得
-./ado-tracker.sh status-history MyProject
+# デフォルトプロジェクトのステータス変更履歴を取得
+./ado-tracker.sh status-history
 
 # fetchコマンドでは自動的にステータス履歴も同時取得されます
-./ado-tracker.sh fetch MyProject 30
+./ado-tracker.sh fetch 30
 ```
 
 ### Work Item詳細情報取得 (fetch-details)
@@ -194,11 +244,11 @@ Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法�
 
 #### 使用例
 ```bash
-# プロジェクト "MyProject" のWork Item詳細情報を取得
-./ado-tracker.sh fetch-details MyProject
+# デフォルトプロジェクトのWork Item詳細情報を取得
+./ado-tracker.sh fetch-details
 
 # fetchコマンドで詳細情報を含めて取得するには --with-details オプションを使用
-./ado-tracker.sh fetch MyProject 30 --with-details
+./ado-tracker.sh fetch 30 --with-details
 ```
 
 ### 作業記録テーブル生成 (generate-work-table)

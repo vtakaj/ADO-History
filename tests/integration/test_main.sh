@@ -4,9 +4,17 @@
 # shellcheck disable=SC2317
 set -euo pipefail
 
-SCRIPT_PATH="./ado-tracker.sh"
+TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$TEST_DIR/../.." && pwd)"
+SCRIPT_PATH="$REPO_ROOT/ado-tracker.sh"
+TEST_WORKDIR="$(mktemp -d)"
 TEST_COUNT=0
 PASS_COUNT=0
+
+cleanup() {
+    rm -rf "$TEST_WORKDIR"
+}
+trap cleanup EXIT
 
 # Test helper functions
 run_test() {
@@ -19,7 +27,7 @@ run_test() {
     echo "Test $TEST_COUNT: $test_name"
     
     set +e
-    "${command[@]}" >/dev/null 2>&1
+    (cd "$TEST_WORKDIR" && "${command[@]}") >/dev/null 2>&1
     local actual_exit_code=$?
     set -e
     
@@ -44,7 +52,7 @@ run_test_with_output() {
     
     set +e
     local output
-    output=$("${command[@]}" 2>&1)
+    output=$(cd "$TEST_WORKDIR" && "${command[@]}" 2>&1)
     local actual_exit_code=$?
     set -e
     
@@ -96,41 +104,41 @@ run_test_with_output "Version option" 0 "v1.0.0" "$SCRIPT_PATH" --version
 # Test 6: Invalid command
 run_test_with_output "Invalid command" 1 "Error: 不明なコマンド" "$SCRIPT_PATH" invalid_command
 
-# Test 7: Fetch command without project name
-run_test_with_output "Fetch without project" 1 "Error: プロジェクト名を指定してください" "$SCRIPT_PATH" fetch
+# Test 7: Fetch command without default project (AZURE_DEVOPS_PROJECT)
+run_test_with_output "Fetch without default project" 1 "AZURE_DEVOPS_PROJECT が設定されていません" "$SCRIPT_PATH" fetch
 
-# Test 8: Fetch with invalid project name
-run_test_with_output "Fetch with invalid project name" 1 "Error: プロジェクト名に無効な文字が含まれています" "$SCRIPT_PATH" fetch "invalid@project"
+# Test 8: Fetch with invalid project name from env
+run_test_with_output "Fetch with invalid project name" 1 "Error: プロジェクト名に無効な文字が含まれています" env AZURE_DEVOPS_PROJECT=invalid@project "$SCRIPT_PATH" fetch 30
 
 # Test 9: Fetch with invalid days
-run_test_with_output "Fetch with invalid days" 1 "Error: 日数は1-365の範囲で指定してください" "$SCRIPT_PATH" fetch validproject 0
+run_test_with_output "Fetch with invalid days" 1 "Error: 日数は1-365の範囲で指定してください" env AZURE_DEVOPS_PROJECT=validproject "$SCRIPT_PATH" fetch 0
 
-# Test 10: Fetch with valid arguments
-run_test_with_output "Fetch with valid arguments" 0 "fetch コマンドの実装予定地" "$SCRIPT_PATH" fetch TestProject 30
+# Test 10: Fetch with valid arguments (missing PAT causes config error)
+run_test_with_output "Fetch with valid arguments" 2 "AZURE_DEVOPS_PAT が設定されていません" env AZURE_DEVOPS_PROJECT=TestProject "$SCRIPT_PATH" fetch 30
 
 # Configuration Management Tests
 
-# Test 11: Config show command
+# Test 12: Config show command
 run_test_with_output "Config show command" 0 "Azure DevOps Tracker 設定情報" "$SCRIPT_PATH" config show
 
-# Test 12: Config show (default)
+# Test 13: Config show (default)
 run_test_with_output "Config show (default)" 0 "Azure DevOps Tracker 設定情報" "$SCRIPT_PATH" config
 
-# Test 13: Config template generation
+# Test 14: Config template generation
 run_test_with_output "Config template generation" 0 ".env.template を生成しました" "$SCRIPT_PATH" config template
 
-# Test 14: Config validate without PAT
+# Test 15: Config validate without PAT
 run_test_with_output "Config validate without PAT" 2 "AZURE_DEVOPS_PAT が設定されていません" "$SCRIPT_PATH" config validate
 
-# Test 15: Config invalid subcommand
+# Test 16: Config invalid subcommand
 run_test_with_output "Config invalid subcommand" 1 "Usage: ado-tracker.sh config" "$SCRIPT_PATH" config invalid
 
 # API Connection Tests
 
-# Test 16: Test connection without PAT
+# Test 17: Test connection without PAT
 run_test_with_output "Test connection without PAT" 1 "AZURE_DEVOPS_PAT が設定されていません" "$SCRIPT_PATH" test-connection
 
-# Test 17: Test connection command availability
+# Test 18: Test connection command availability
 run_test_with_output "Test connection command in help" 0 "test-connection" "$SCRIPT_PATH" help
 
 echo "=================================="

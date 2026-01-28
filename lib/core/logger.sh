@@ -44,7 +44,7 @@ handle_api_error() {
             ;;
         404)
             log_error "リソースが見つかりません: $endpoint"
-            log_error "対処法: 1) プロジェクト名を確認 2) 組織名を確認 3) Work Item IDの存在を確認"
+            log_error "対処法: 1) プロジェクト名を確認 (AZURE_DEVOPS_PROJECT=${AZURE_DEVOPS_PROJECT:-"(未設定)"}) 2) 組織名を確認 (AZURE_DEVOPS_ORG=${AZURE_DEVOPS_ORG:-"(未設定)"}) 3) Work Item IDの存在を確認"
             ;;
         429)
             # Extract Retry-After header if available

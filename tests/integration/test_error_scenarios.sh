@@ -6,7 +6,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ADO_TRACKER_SCRIPT="$SCRIPT_DIR/ado-tracker.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ADO_TRACKER_SCRIPT="$REPO_ROOT/ado-tracker.sh"
+TEST_WORKDIR="$(mktemp -d)"
 
 # Colors for output
 RED='\033[0;31m'
@@ -26,17 +28,22 @@ print_test_header() {
 
 print_success() {
     echo -e "${GREEN}✓ $1${NC}"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 }
 
 print_failure() {
     echo -e "${RED}✗ $1${NC}"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 }
 
 print_info() {
     echo -e "${YELLOW}ℹ $1${NC}"
 }
+
+cleanup() {
+    rm -rf "$TEST_WORKDIR"
+}
+trap cleanup EXIT
 
 # Test 1: Verify enhanced logging functions exist
 test_logging_functions() {
@@ -133,7 +140,7 @@ test_error_handling() {
     local test_codes=("401" "403" "404" "429" "500" "000")
     
     for code in "${test_codes[@]}"; do
-        handle_api_error "$code" "" "test-endpoint" 2>&1 | tee "$temp_log"
+        handle_api_error "$code" "" "test-endpoint" 2>&1 | tee "$temp_log" || true
         
         case "$code" in
             401)
@@ -208,7 +215,9 @@ test_checkpoint_operations() {
         
         # Verify data integrity
         local operation
-        operation=$(echo "$loaded_data" | jq -r '.operation' 2>/dev/null)
+        local checkpoint_json
+        checkpoint_json=$(echo "$loaded_data" | sed -n '/^{/,$p')
+        operation=$(echo "$checkpoint_json" | jq -r '.operation' 2>/dev/null || true)
         if [[ "$operation" == "test_operation" ]]; then
             print_success "Checkpoint data integrity verified"
         else
@@ -263,6 +272,7 @@ test_script_syntax() {
 main() {
     echo -e "${BLUE}Starting US-001-BE-005 Error Handling and Logging Tests${NC}"
     echo "=========================================================="
+    cd "$TEST_WORKDIR"
     
     # Run tests
     test_script_syntax
