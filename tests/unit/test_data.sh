@@ -5,10 +5,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_PATH="$REPO_ROOT/ado-tracker.sh"
 
 # Load script in a way that doesn't trigger the main execution
 set +euo pipefail
-source "$SCRIPT_DIR/ado-tracker.sh"
+source "$SCRIPT_PATH"
 set -euo pipefail
 
 # Test colors
@@ -29,12 +31,12 @@ assert_equals() {
     
     if [[ "$expected" == "$actual" ]]; then
         echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         echo -e "${RED}✗${NC} $test_name"
         echo "  Expected: $expected"
         echo "  Actual: $actual"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
 }
 
@@ -45,12 +47,12 @@ assert_contains() {
     
     if echo "$haystack" | grep -q "$needle"; then
         echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         echo -e "${RED}✗${NC} $test_name"
         echo "  Expected to find: $needle"
         echo "  In: $haystack"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
 }
 
@@ -60,11 +62,11 @@ assert_json_valid() {
     
     if echo "$json_data" | jq empty 2>/dev/null; then
         echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         echo -e "${RED}✗${NC} $test_name"
         echo "  Invalid JSON: $json_data"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
 }
 
@@ -74,11 +76,11 @@ assert_not_empty() {
     
     if [[ -n "$value" ]]; then
         echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         echo -e "${RED}✗${NC} $test_name"
         echo "  Value should not be empty"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
 }
 
@@ -224,13 +226,13 @@ test_merge_workitem_data() {
     result=$(merge_workitem_data "$basic_data" "$details_response" "$workitem_id")
     
     assert_json_valid "$result" "merge_workitem_data returns valid JSON"
-    assert_contains "$result" '"id":123' "Result contains work item ID"
-    assert_contains "$result" '"title":"Test Work Item"' "Result contains title"
-    assert_contains "$result" '"type":"User Story"' "Result contains work item type"
-    assert_contains "$result" '"priority":2' "Result contains priority"
-    assert_contains "$result" '"originalEstimate":8' "Result contains original estimate"
-    assert_contains "$result" '"assignedTo":"Test User"' "Result contains assigned user"
-    assert_contains "$result" '"currentStatus":"Active"' "Result contains current status"
+    assert_contains "$result" '"id": 123' "Result contains work item ID"
+    assert_contains "$result" '"title": "Test Work Item"' "Result contains title"
+    assert_contains "$result" '"type": "User Story"' "Result contains work item type"
+    assert_contains "$result" '"priority": 2' "Result contains priority"
+    assert_contains "$result" '"originalEstimate": 8' "Result contains original estimate"
+    assert_contains "$result" '"assignedTo": "Test User"' "Result contains assigned user"
+    assert_contains "$result" '"currentStatus": "Active"' "Result contains current status"
     assert_contains "$result" '+09:00' "Result contains JST timezone conversion"
 }
 

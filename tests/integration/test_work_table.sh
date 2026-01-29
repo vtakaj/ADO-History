@@ -4,10 +4,12 @@ set -euo pipefail
 
 # Test configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAIN_SCRIPT="$SCRIPT_DIR/ado-tracker.sh"
-TEST_DATA_DIR="$SCRIPT_DIR/test_data"
-DATA_DIR="./data"
-TEST_OUTPUT_DIR="$SCRIPT_DIR/test_output"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+MAIN_SCRIPT="$REPO_ROOT/ado-tracker.sh"
+TEST_WORKDIR="$(mktemp -d)"
+TEST_DATA_DIR="$TEST_WORKDIR/test_data"
+DATA_DIR="$TEST_WORKDIR/data"
+TEST_OUTPUT_DIR="$TEST_WORKDIR/test_output"
 
 # Test colors
 RED='\033[0;31m'
@@ -95,6 +97,7 @@ EOF
       "workitemId": 12345,
       "changeDate": "2025-01-10T09:00:00+09:00",
       "changedBy": "田中太郎",
+      "assignedTo": "田中太郎",
       "previousStatus": "New",
       "newStatus": "Doing",
       "revision": 1
@@ -103,6 +106,7 @@ EOF
       "workitemId": 12345,
       "changeDate": "2025-01-15T17:30:00+09:00",
       "changedBy": "田中太郎",
+      "assignedTo": "田中太郎",
       "previousStatus": "Doing",
       "newStatus": "Done",
       "revision": 2
@@ -111,6 +115,7 @@ EOF
       "workitemId": 12346,
       "changeDate": "2025-01-12T10:00:00+09:00",
       "changedBy": "佐藤花子",
+      "assignedTo": "佐藤花子",
       "previousStatus": "New",
       "newStatus": "Doing",
       "revision": 1
@@ -119,6 +124,7 @@ EOF
       "workitemId": 12346,
       "changeDate": "2025-01-14T15:45:00+09:00",
       "changedBy": "佐藤花子",
+      "assignedTo": "佐藤花子",
       "previousStatus": "Doing",
       "newStatus": "Done",
       "revision": 2
@@ -127,6 +133,7 @@ EOF
       "workitemId": 12347,
       "changeDate": "2025-01-11T14:00:00+09:00",
       "changedBy": "鈴木一郎",
+      "assignedTo": "鈴木一郎",
       "previousStatus": "New",
       "newStatus": "Doing",
       "revision": 1
@@ -135,6 +142,7 @@ EOF
       "workitemId": 12347,
       "changeDate": "2025-01-13T09:20:00+09:00",
       "changedBy": "鈴木一郎",
+      "assignedTo": "鈴木一郎",
       "previousStatus": "Doing",
       "newStatus": "Blocked",
       "revision": 2
@@ -143,6 +151,7 @@ EOF
       "workitemId": 12347,
       "changeDate": "2025-01-20T10:00:00+09:00",
       "changedBy": "鈴木一郎",
+      "assignedTo": "鈴木一郎",
       "previousStatus": "Blocked",
       "newStatus": "Doing",
       "revision": 3
@@ -151,6 +160,7 @@ EOF
       "workitemId": 12348,
       "changeDate": "2025-01-08T11:00:00+09:00",
       "changedBy": "田中太郎",
+      "assignedTo": "田中太郎",
       "previousStatus": "New",
       "newStatus": "Doing",
       "revision": 1
@@ -159,6 +169,7 @@ EOF
       "workitemId": 12348,
       "changeDate": "2025-01-12T14:15:00+09:00",
       "changedBy": "田中太郎",
+      "assignedTo": "田中太郎",
       "previousStatus": "Doing",
       "newStatus": "Done",
       "revision": 2
@@ -173,9 +184,7 @@ EOF
 # Cleanup test environment
 cleanup_test_environment() {
     log_info "Cleaning up test environment..."
-    rm -rf "$TEST_DATA_DIR"
-    rm -rf "$DATA_DIR"
-    rm -rf "$TEST_OUTPUT_DIR"
+    rm -rf "$TEST_WORKDIR"
     log_info "Cleanup complete"
 }
 
@@ -184,7 +193,7 @@ test_assignee_extraction() {
     log_test "Testing assignee extraction from history..."
     
     local assignees
-    if assignees=$(bash -c ". $MAIN_SCRIPT && extract_assignees_from_history '2025-01'" 2>/dev/null); then
+    if assignees=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && extract_assignees_from_history '2025-01'" 2>/dev/null); then
         # Check for expected assignees
         if echo "$assignees" | grep -q "田中太郎" && echo "$assignees" | grep -q "佐藤花子" && echo "$assignees" | grep -q "鈴木一郎"; then
             log_success "Assignee extraction includes all expected members"
@@ -203,7 +212,7 @@ test_table_header_generation() {
     log_test "Testing table header generation..."
     
     local output
-    if output=$(bash -c ". $MAIN_SCRIPT && generate_table_header '田中太郎' '佐藤花子' '鈴木一郎'" 2>/dev/null); then
+    if output=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && generate_table_header '田中太郎;佐藤花子;鈴木一郎'" 2>/dev/null); then
         # Check for required headers
         if echo "$output" | grep -q "| 日付 | 曜日 |" && echo "$output" | grep -q "田中太郎" && echo "$output" | grep -q "佐藤花子" && echo "$output" | grep -q "鈴木一郎"; then
             log_success "Table header contains all required columns"
@@ -230,7 +239,7 @@ test_japanese_day_of_week() {
     log_test "Testing Japanese day of week conversion..."
     
     local monday
-    if monday=$(bash -c ". $MAIN_SCRIPT && get_japanese_day_of_week 1" 2>/dev/null); then
+    if monday=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && get_japanese_day_of_week 1" 2>/dev/null); then
         if [[ "$monday" == "月" ]]; then
             log_success "Japanese day conversion works for Monday"
         else
@@ -243,7 +252,7 @@ test_japanese_day_of_week() {
     fi
     
     local sunday
-    if sunday=$(bash -c ". $MAIN_SCRIPT && get_japanese_day_of_week 7" 2>/dev/null); then
+    if sunday=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && get_japanese_day_of_week 7" 2>/dev/null); then
         if [[ "$sunday" == "日" ]]; then
             log_success "Japanese day conversion works for Sunday"
         else
@@ -262,7 +271,7 @@ test_active_tickets_detection() {
     
     # Test for a day when ticket 12345 should be active (during Doing period)
     local active_tickets
-    if active_tickets=$(bash -c ". $MAIN_SCRIPT && get_active_tickets_for_assignee_on_date '田中太郎' '2025-01-12'" 2>/dev/null); then
+    if active_tickets=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && get_active_tickets_for_assignee_on_date '田中太郎' '2025-01-12'" 2>/dev/null); then
         if echo "$active_tickets" | grep -q "12345"; then
             log_success "Active tickets detection works for ongoing ticket"
         else
@@ -276,7 +285,7 @@ test_active_tickets_detection() {
     
     # Test for a day when ticket should be done
     local done_tickets
-    if done_tickets=$(bash -c ". $MAIN_SCRIPT && get_active_tickets_for_assignee_on_date '田中太郎' '2025-01-15'" 2>/dev/null); then
+    if done_tickets=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && get_active_tickets_for_assignee_on_date '田中太郎' '2025-01-15'" 2>/dev/null); then
         if echo "$done_tickets" | grep -q "12345"; then
             log_success "Active tickets detection works for completion day"
         else
@@ -294,7 +303,7 @@ test_ticket_list_generation() {
     log_test "Testing ticket list generation..."
     
     local output
-    if output=$(bash -c ". $MAIN_SCRIPT && generate_ticket_list '2025-01'" 2>/dev/null); then
+    if output=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && generate_ticket_list '2025-01' ''" 2>/dev/null); then
         # Check for list header
         if echo "$output" | grep -q "## 対応チケット一覧"; then
             log_success "Ticket list contains header"
@@ -312,7 +321,7 @@ test_ticket_list_generation() {
         fi
         
         # Check for markdown format
-        if echo "$output" | grep -q "- \*\*[0-9]*\*\*:"; then
+        if echo "$output" | grep -Fq -- "- **#"; then
             log_success "Ticket list uses correct markdown format"
         else
             log_error "Ticket list incorrect markdown format"
@@ -330,7 +339,7 @@ test_full_work_table_generation() {
     
     local output_file="$TEST_OUTPUT_DIR/test_2025-01.md"
     
-    if bash "$MAIN_SCRIPT" generate-work-table 2025-01 "$output_file" >/dev/null 2>&1; then
+    if (cd "$TEST_WORKDIR" && bash "$MAIN_SCRIPT" generate-work-table 2025-01 "$output_file" >/dev/null 2>&1); then
         log_success "Work table generation command executed successfully"
         
         if [[ -f "$output_file" ]]; then
@@ -389,7 +398,7 @@ test_command_validation() {
     log_test "Testing command validation..."
     
     # Test missing arguments
-    if ! bash "$MAIN_SCRIPT" generate-work-table >/dev/null 2>&1; then
+    if ! (cd "$TEST_WORKDIR" && bash "$MAIN_SCRIPT" generate-work-table >/dev/null 2>&1); then
         log_success "Command properly validates missing arguments"
     else
         log_error "Command should fail with missing arguments"
@@ -397,7 +406,7 @@ test_command_validation() {
     fi
     
     # Test invalid date format
-    if ! bash "$MAIN_SCRIPT" generate-work-table "2025-1" "/tmp/test.md" >/dev/null 2>&1; then
+    if ! (cd "$TEST_WORKDIR" && bash "$MAIN_SCRIPT" generate-work-table "2025-1" "/tmp/test.md" >/dev/null 2>&1); then
         log_success "Command properly validates invalid date format"
     else
         log_error "Command should fail with invalid date format"
@@ -408,7 +417,7 @@ test_command_validation() {
     local temp_data_dir="$DATA_DIR.bak"
     mv "$DATA_DIR" "$temp_data_dir" 2>/dev/null || true
     
-    if ! bash "$MAIN_SCRIPT" generate-work-table 2025-01 "/tmp/test.md" >/dev/null 2>&1; then
+    if ! (cd "$TEST_WORKDIR" && bash "$MAIN_SCRIPT" generate-work-table 2025-01 "/tmp/test.md" >/dev/null 2>&1); then
         log_success "Command properly handles missing data files"
     else
         log_error "Command should fail with missing data files"
@@ -426,7 +435,7 @@ test_blocked_status_handling() {
     
     # Test that ticket 12347 shows as active on 2025-01-12 (during Doing)
     local active_before_blocked
-    if active_before_blocked=$(bash -c ". $MAIN_SCRIPT && get_active_tickets_for_assignee_on_date '鈴木一郎' '2025-01-12'" 2>/dev/null); then
+    if active_before_blocked=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && get_active_tickets_for_assignee_on_date '鈴木一郎' '2025-01-12'" 2>/dev/null); then
         if echo "$active_before_blocked" | grep -q "12347"; then
             log_success "Blocked status handling: ticket active before blocking"
         else
@@ -440,7 +449,7 @@ test_blocked_status_handling() {
     
     # Test that ticket 12347 shows as active on 2025-01-20 (unblocked day)
     local active_after_unblocked
-    if active_after_unblocked=$(bash -c ". $MAIN_SCRIPT && get_active_tickets_for_assignee_on_date '鈴木一郎' '2025-01-20'" 2>/dev/null); then
+    if active_after_unblocked=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && get_active_tickets_for_assignee_on_date '鈴木一郎' '2025-01-20'" 2>/dev/null); then
         if echo "$active_after_unblocked" | grep -q "12347"; then
             log_success "Blocked status handling: ticket active after unblocking"
         else
@@ -458,7 +467,7 @@ test_last_day_calculation() {
     log_test "Testing last day of month calculation..."
     
     local last_day_jan
-    if last_day_jan=$(bash -c ". $MAIN_SCRIPT && get_last_day_of_month '2025-01'" 2>/dev/null); then
+    if last_day_jan=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && get_last_day_of_month '2025-01'" 2>/dev/null); then
         if [[ "$last_day_jan" == "2025-01-31" ]]; then
             log_success "Last day calculation works for January"
         else
@@ -471,7 +480,7 @@ test_last_day_calculation() {
     fi
     
     local last_day_feb
-    if last_day_feb=$(bash -c ". $MAIN_SCRIPT && get_last_day_of_month '2025-02'" 2>/dev/null); then
+    if last_day_feb=$(bash -c "cd \"$TEST_WORKDIR\" && . \"$MAIN_SCRIPT\" && get_last_day_of_month '2025-02'" 2>/dev/null); then
         if [[ "$last_day_feb" == "2025-02-28" ]]; then
             log_success "Last day calculation works for February (non-leap year)"
         else

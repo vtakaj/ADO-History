@@ -12,9 +12,10 @@ load_env_file() {
             log_warn ".envファイルの権限が安全ではありません: $perms (推奨: 600)"
         fi
         
-        # コメント行と空行を除外して読み込み
+        # .env をそのまま読み込み（コメント/空行は source で問題ない）
         set -a
-        source <(grep -v '^#' "$env_file" | grep -v '^$')
+        # shellcheck disable=SC1090
+        source "$env_file"
         set +a
         
         log_info ".envファイルを読み込み: $env_file"
@@ -40,6 +41,12 @@ validate_config() {
         ((errors++))
     elif [[ ! "$AZURE_DEVOPS_ORG" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$ ]]; then
         log_error "AZURE_DEVOPS_ORG の形式が正しくありません"
+        ((errors++))
+    fi
+    
+    # デフォルトプロジェクト検証
+    if [[ -z "$AZURE_DEVOPS_PROJECT" ]]; then
+        log_error "AZURE_DEVOPS_PROJECT が設定されていません。.env にデフォルトプロジェクトを設定してください"
         ((errors++))
     fi
     
@@ -80,6 +87,7 @@ APIバージョン: $API_VERSION
 リトライ間隔: ${RETRY_DELAY}秒
 リクエストタイムアウト: ${REQUEST_TIMEOUT}秒
 バッチサイズ: $BATCH_SIZE
+作業記録対象者: ${WORK_TABLE_ASSIGNEES:-"(未設定)"}
 PAT設定: $(if [[ -n "$AZURE_DEVOPS_PAT" ]]; then echo "設定済み"; else echo "未設定"; fi)
 EOF
 }
@@ -90,6 +98,7 @@ generate_env_template() {
 # Azure DevOps 接続設定
 AZURE_DEVOPS_PAT=your_personal_access_token_here
 AZURE_DEVOPS_ORG=your_organization_name
+# fetch コマンドで使用するデフォルトプロジェクト名
 AZURE_DEVOPS_PROJECT=your_default_project_name
 
 # API設定
@@ -103,6 +112,9 @@ REQUEST_TIMEOUT=30
 
 # バッチ処理設定
 BATCH_SIZE=50
+
+# 作業記録テーブル対象者（カンマ区切り）
+WORK_TABLE_ASSIGNEES=
 EOF
     
     chmod 600 .env.template

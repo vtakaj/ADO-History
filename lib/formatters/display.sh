@@ -7,9 +7,9 @@ show_usage() {
 Usage: $SCRIPT_NAME <command> [options]
 
 Commands:
-  fetch <project> [days] [--with-details]  チケット履歴とステータス変更履歴を取得
-  status-history <project>                 ステータス変更履歴のみを取得
-  fetch-details <project>                  Work Item詳細情報のみを取得
+  fetch [project] [days] [--with-details]  チケット履歴とステータス変更履歴を取得
+  status-history [project]                 ステータス変更履歴のみを取得
+  fetch-details [project]                  Work Item詳細情報のみを取得
   generate-work-table <YYYY-MM> <file>     月次作業記録テーブル（マークダウン）を生成
   test-connection                          API接続テストを実行
   test-connection --mock                   モック環境でAPI機能をテスト
@@ -23,9 +23,9 @@ Options:
 
 Examples:
   $SCRIPT_NAME fetch MyProject 30                    # 基本情報とステータス履歴のみ
-  $SCRIPT_NAME fetch MyProject 30 --with-details     # 詳細情報も含めて取得
-  $SCRIPT_NAME status-history MyProject
-  $SCRIPT_NAME fetch-details MyProject               # 詳細情報のみ取得
+  $SCRIPT_NAME fetch 30 --with-details               # 既定プロジェクトで詳細情報も含めて取得
+  $SCRIPT_NAME status-history                        # 既定プロジェクトのステータス履歴のみ取得
+  $SCRIPT_NAME fetch-details                         # 既定プロジェクトの詳細情報のみ取得
   $SCRIPT_NAME generate-work-table 2025-01 ./work_records/2025-01.md  # 月次作業記録テーブル生成
   $SCRIPT_NAME test-connection
   $SCRIPT_NAME config show

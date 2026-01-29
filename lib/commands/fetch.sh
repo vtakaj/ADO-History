@@ -91,6 +91,7 @@ fetch_workitems() {
         
         local batch_ids=""
         local batch_count=0
+        local batch_size_count=0  # 旧変数名の互換対応
         
         while IFS= read -r id; do
             if [[ -n "$id" ]]; then
@@ -100,6 +101,7 @@ fetch_workitems() {
                     batch_ids="$id"
                 fi
                 ((batch_count++))
+                batch_size_count=$batch_count
                 
                 # バッチサイズに達したか、最後のIDの場合は処理実行
                 local total_ids_count
@@ -108,7 +110,7 @@ fetch_workitems() {
                 if [[ $batch_count -ge $BATCH_SIZE ]] || [[ $total_ids_count -eq $current_total ]]; then
                     local batch_endpoint="${project}/_apis/wit/workitems?ids=${batch_ids}&\$expand=Fields"
                     
-                    log_info "Work Items詳細取得 (バッチ: $batch_count件)"
+                    log_info "Work Items詳細取得 (バッチ: ${batch_count}件)"
                     
                     local batch_response
                     if batch_response=$(call_ado_api "$batch_endpoint"); then
@@ -123,7 +125,7 @@ fetch_workitems() {
                             all_workitems=$(echo "$all_workitems" | jq --argjson batch "$batch_array" '.workitems += $batch')
                             
                             total_count=$((total_count + batch_count))
-                            log_info "バッチ処理完了: $batch_count件 (累計: $total_count件)"
+                            log_info "バッチ処理完了: ${batch_count}件 (累計: ${total_count}件)"
                         fi
                         
                         # レート制限対応の待機
@@ -136,6 +138,7 @@ fetch_workitems() {
                     # バッチリセット
                     batch_ids=""
                     batch_count=0
+                    batch_size_count=0
                 fi
             fi
         done <<< "$ids_array"
@@ -147,7 +150,7 @@ fetch_workitems() {
     
     # データの保存
     if save_json "workitems.json" "$all_workitems"; then
-        log_info "Work Items取得完了: $total_count件"
+        log_info "Work Items取得完了: ${total_count}件"
         log_info "保存先: $DATA_DIR/workitems.json"
         
         # US-001-BE-005: Clear checkpoint on successful completion
@@ -206,7 +209,7 @@ fetch_all_status_history() {
     
     local total_items
     total_items=$(echo "$workitem_ids" | wc -l)
-    log_info "処理対象Work Items: $total_items件"
+    log_info "処理対象Work Items: ${total_items}件"
     
     local all_status_history='{"status_history": []}'
     local processed_count=0
@@ -257,7 +260,7 @@ fetch_all_status_history() {
     if save_json "status_history.json" "$all_status_history"; then
         local history_count
         history_count=$(echo "$all_status_history" | jq '.status_history | length')
-        log_info "ステータス変更履歴取得完了: $history_count件"
+        log_info "ステータス変更履歴取得完了: ${history_count}件"
         log_info "保存先: $DATA_DIR/status_history.json"
         return 0
     else
@@ -297,7 +300,7 @@ fetch_all_details() {
     
     local total_items
     total_items=$(echo "$workitem_ids" | wc -l)
-    log_info "処理対象Work Items: $total_items件"
+    log_info "処理対象Work Items: ${total_items}件"
     
     local all_details='{"workitem_details": []}'
     local processed_count=0
@@ -305,6 +308,7 @@ fetch_all_details() {
     # Process in batches for performance optimization
     local batch_ids=""
     local batch_count=0
+    local batch_size_count=0  # 旧変数名の互換対応
     
     while IFS= read -r workitem_id; do
         if [[ -n "$workitem_id" ]]; then
@@ -314,10 +318,11 @@ fetch_all_details() {
                 batch_ids="$workitem_id"
             fi
             ((batch_count++))
+            batch_size_count=$batch_count
             
             # Process batch when batch size is reached or at the end
             if [[ $batch_count -ge $BATCH_SIZE ]] || [[ $((processed_count + batch_count)) -eq $total_items ]]; then
-                log_info "詳細情報取得 (バッチ: $batch_count件, 進捗: $((processed_count + batch_count))/$total_items)"
+                log_info "詳細情報取得 (バッチ: ${batch_count}件, 進捗: $((processed_count + batch_count))/$total_items)"
                 
                 # Use batch API endpoint for better performance
                 local batch_endpoint="${project}/_apis/wit/workitems?ids=${batch_ids}&\$expand=fields"
@@ -379,7 +384,7 @@ ${jst_detail}"
                             all_details=$(echo "$all_details" | jq --argjson batch "$batch_array" '.workitem_details += $batch')
                             
                             processed_count=$((processed_count + batch_count))
-                            log_info "バッチ処理完了: $batch_count件 (累計: $processed_count件)"
+                            log_info "バッチ処理完了: ${batch_count}件 (累計: ${processed_count}件)"
                         fi
                     fi
                     
@@ -394,6 +399,7 @@ ${jst_detail}"
                 # Reset batch
                 batch_ids=""
                 batch_count=0
+                batch_size_count=0
             fi
         fi
     done <<< "$workitem_ids"
@@ -402,7 +408,7 @@ ${jst_detail}"
     if save_json "workitem_details.json" "$all_details"; then
         local details_count
         details_count=$(echo "$all_details" | jq '.workitem_details | length')
-        log_info "Work Item詳細情報取得完了: $details_count件"
+        log_info "Work Item詳細情報取得完了: ${details_count}件"
         log_info "保存先: $DATA_DIR/workitem_details.json"
         return 0
     else
@@ -413,11 +419,10 @@ ${jst_detail}"
 
 # コマンド実装
 cmd_fetch() {
-    local project=""
     local days="30"
     local with_details=false
     
-    # Parse arguments
+    # Parse arguments: fetch <days> [--with-details]
     while [[ $# -gt 0 ]]; do
         case $1 in
             --with-details)
@@ -429,19 +434,24 @@ cmd_fetch() {
                 exit 1
                 ;;
             *)
-                if [[ -z "$project" ]]; then
-                    project="$1"
-                elif [[ -z "$days" || "$days" == "30" ]]; then
+                if [[ "$days" == "30" ]]; then
                     days="$1"
+                    shift
                 else
                     echo "Error: 余分な引数: $1" >&2
                     exit 1
                 fi
-                shift
                 ;;
         esac
     done
     
+    local project="${AZURE_DEVOPS_PROJECT:-}"
+    if [[ -z "$project" ]]; then
+        log_error "AZURE_DEVOPS_PROJECT が設定されていません。.env にデフォルトプロジェクトを設定してください"
+        exit 1
+    fi
+    log_info "デフォルトプロジェクトを使用: $project (AZURE_DEVOPS_PROJECT)"
+
     # バリデーション
     validate_project_name "$project" || exit 1
     validate_days "$days" || exit 1
@@ -463,7 +473,7 @@ cmd_fetch() {
         if [[ -n "$workitems_data" ]]; then
             local count
             count=$(echo "$workitems_data" | jq '.workitems | length')
-            log_info "取得されたWork Items数: $count件"
+            log_info "取得されたWork Items数: ${count}件"
             
             # 最初の5件を表示（サンプル）
             if [[ "$count" -gt 0 ]]; then
@@ -502,6 +512,11 @@ cmd_fetch() {
 # Status history command
 cmd_status_history() {
     local project="${1:-}"
+
+    if [[ -z "$project" && -n "${AZURE_DEVOPS_PROJECT:-}" ]]; then
+        project="$AZURE_DEVOPS_PROJECT"
+        log_info "デフォルトプロジェクトを使用: $project"
+    fi
     
     # バリデーション
     if [[ -z "$project" ]]; then
@@ -528,7 +543,7 @@ cmd_status_history() {
         if [[ -n "$status_data" ]]; then
             local count
             count=$(echo "$status_data" | jq '.status_history | length')
-            log_info "取得されたステータス変更履歴数: $count件"
+            log_info "取得されたステータス変更履歴数: ${count}件"
             
             # 最初の5件を表示（サンプル）
             if [[ "$count" -gt 0 ]]; then
@@ -546,6 +561,11 @@ cmd_status_history() {
 # US-001-BE-004: Work Item details command
 cmd_fetch_details() {
     local project="${1:-}"
+
+    if [[ -z "$project" && -n "${AZURE_DEVOPS_PROJECT:-}" ]]; then
+        project="$AZURE_DEVOPS_PROJECT"
+        log_info "デフォルトプロジェクトを使用: $project"
+    fi
     
     # バリデーション
     if [[ -z "$project" ]]; then
@@ -572,7 +592,7 @@ cmd_fetch_details() {
         if [[ -n "$details_data" ]]; then
             local count
             count=$(echo "$details_data" | jq '.workitem_details | length')
-            log_info "取得されたWork Item詳細情報数: $count件"
+            log_info "取得されたWork Item詳細情報数: ${count}件"
             
             # 最初の3件を表示（サンプル）
             if [[ "$count" -gt 0 ]]; then
