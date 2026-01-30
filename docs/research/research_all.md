@@ -1,29 +1,29 @@
-# Azure DevOps 作業実績抽出ツール 技術スタック調査報告書
+# Azure DevOps Work Record Extraction Tool Technical Stack Report
 
-## 調査概要
-現行実装は Bash を中心としたシンプル構成で、`ado-tracker.sh` をエントリーポイントに複数モジュールへ分割されています。Azure DevOps REST API から Work Item とステータス履歴を取得し、月次の作業記録テーブル（Markdown）を生成します。
+## Survey overview
+The current implementation is a simple Bash-centered setup, with `ado-tracker.sh` as the entry point and split into multiple modules. It fetches Work Items and status history from the Azure DevOps REST API and generates a monthly work record table (Markdown).
 
-## 技術スタック
+## Technology stack
 - bash
-- curl (Azure DevOps API 呼び出し)
-- jq (JSON 処理)
-- awk/sed (テキスト処理)
-- date (日付計算)
+- curl (Azure DevOps API calls)
+- jq (JSON processing)
+- awk/sed (text processing)
+- date (date calculations)
 
-**注意:** jq は環境によっては事前インストールが必要です。
+Note: jq may need to be installed in advance depending on the environment.
 
-## 実装構成
+## Implementation structure
 ```
-ado-tracker.sh          # エントリーポイント（コマンドルーター）
-lib/core/               # API クライアント、設定、データ処理、ログ
-lib/commands/           # サブコマンド実装
-lib/formatters/         # 表示/Markdown 出力
-lib/utils/              # 日付・文字列・ファイル・バリデーション
-DATA_DIR=./data/        # 取得データ保存先
-work_records/           # 作業記録テーブル出力先
+ado-tracker.sh          # Entry point (command router)
+lib/core/               # API client, configuration, data processing, logging
+lib/commands/           # Subcommand implementations
+lib/formatters/         # Display/Markdown output
+lib/utils/              # Date, string, file, validation utilities
+DATA_DIR=./data/        # Fetched data storage location
+work_records/           # Work record table output location
 ```
 
-## コマンド一覧（現行実装）
+## Command list (current implementation)
 ```bash
 ./ado-tracker.sh fetch <project> [days] [--with-details]
 ./ado-tracker.sh status-history <project>
@@ -33,50 +33,50 @@ work_records/           # 作業記録テーブル出力先
 ./ado-tracker.sh config show|validate|template
 ```
 
-## データ保存
+## Data storage
 ```
 ./data/workitems.json
 ./data/status_history.json
-./data/workitem_details.json   # --with-details または fetch-details 実行時のみ
-./data/backup/                 # 自動バックアップ
-./data/checkpoint.json         # 中断復旧用チェックポイント
+./data/workitem_details.json   # Only when running --with-details or fetch-details
+./data/backup/                 # Automatic backups
+./data/checkpoint.json         # Checkpoint for resume
 ```
 
-## 作業記録テーブル生成
-- 出力形式: Markdown
-- 出力先: `./work_records/YYYY-MM.md`
-- 対象者の絞り込み:
-  - コマンドの `--assignees` 指定
-  - もしくは `.env` の `WORK_TABLE_ASSIGNEES` を使用
+## Work record table generation
+- Output format: Markdown
+- Output location: `./work_records/YYYY-MM.md`
+- Assignee filtering:
+  - Use `--assignees` in the command
+  - Or use `WORK_TABLE_ASSIGNEES` in `.env`
 
-## 実行手順（例）
+## Execution steps (example)
 ```bash
-# 事前に .env を用意（AZURE_DEVOPS_PAT, AZURE_DEVOPS_ORG など）
+# Prepare .env in advance (AZURE_DEVOPS_PAT, AZURE_DEVOPS_ORG, etc.)
 
-# 直近30日を取得
+# Fetch the last 30 days
 ./ado-tracker.sh fetch MyProject 30
 
-# 詳細も含めて取得
+# Fetch with details
 ./ado-tracker.sh fetch MyProject 30 --with-details
 
-# 月次作業記録テーブル生成
+# Generate monthly work record table
 ./ado-tracker.sh generate-work-table 2025-12 ./work_records/2025-12.md
 ```
 
-## 自動化（例）
-`auto-report` の専用コマンドは現行実装にありません。cron 等で `fetch` と `generate-work-table` を連続実行する形で自動化します。
+## Automation (example)
+There is no dedicated `auto-report` command in the current implementation. Automate by running `fetch` and `generate-work-table` sequentially via cron, etc.
 
 ```bash
-# 月初に前月分を生成する例
+# Example: generate the previous month at the start of each month
 0 9 1 * * /path/to/ado-tracker.sh fetch MyProject 40 && \
   /path/to/ado-tracker.sh generate-work-table 2025-12 /path/to/work_records/2025-12.md
 ```
 
-## セキュリティ
-- PAT は環境変数（.env）で管理し、コミットしない
-- `.env` の推奨権限は 600
-- ログには機密情報を出さない
+## Security
+- Manage PAT via environment variables (.env) and do not commit it
+- Recommended permissions for `.env` are 600
+- Do not print secrets in logs
 
-## 備考（未実装）
-- `calculate`, `summary`, `auto-report`, `export` などのコマンドは現行実装に存在しません
-- CSV/Excel/JSON へのエクスポートは未対応（Markdown 出力のみ）
+## Notes (not implemented)
+- Commands such as `calculate`, `summary`, `auto-report`, and `export` do not exist in the current implementation
+- Export to CSV/Excel/JSON is not supported (Markdown output only)

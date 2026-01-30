@@ -1,68 +1,68 @@
 # AGENTS.md
 
-このリポジトリで作業するエージェント向けの短いガイドです。
+A short guide for agents working in this repository.
 
-## プロジェクト概要
-- Azure DevOps の Work Item とステータス履歴を取得し、作業記録テーブルを生成する Bash ツール
-- エントリポイント: `./ado-tracker.sh`
-- 取得データは `./data/` に JSON として保存、作業記録は `./work_records/` に出力
+## Project overview
+- A Bash tool that fetches Azure DevOps Work Items and status history, then generates a work record table
+- Entry point: `./ado-tracker.sh`
+- Fetched data is saved as JSON under `./data/`, and work records are output to `./work_records/`
 
-## 主要構成
-- `ado-tracker.sh`: コマンドルーター（軽量）
-- `lib/core/`: API クライアント、設定、データ処理、ログ
-- `lib/commands/`: 各サブコマンドの実装
-- `lib/formatters/`: 表示/マークダウン出力
-- `lib/utils/`: 日付・文字列・ファイル・バリデーション
-- `tests/`: unit / integration テスト
+## Main structure
+- `ado-tracker.sh`: command router (lightweight)
+- `lib/core/`: API client, configuration, data processing, logging
+- `lib/commands/`: subcommand implementations
+- `lib/formatters/`: display and markdown output
+- `lib/utils/`: date, string, file, validation utilities
+- `tests/`: unit / integration tests
 
-## 主要コンポーネント
-1. **API クライアント** (`lib/core/api_client.sh`): Azure DevOps REST API 呼び出し、リトライ/レート制限
-2. **データ処理** (`lib/core/data_processor.sh`): ステータス履歴抽出・変換
-3. **設定管理** (`lib/core/config_manager.sh`): 環境変数の読み込み/検証
-4. **ログ** (`lib/core/logger.sh`): タイムスタンプ付きログ出力
+## Key components
+1. **API client** (`lib/core/api_client.sh`): Azure DevOps REST API calls, retry/rate limiting
+2. **Data processing** (`lib/core/data_processor.sh`): extract and transform status history
+3. **Configuration** (`lib/core/config_manager.sh`): load and validate environment variables
+4. **Logging** (`lib/core/logger.sh`): timestamped log output
 
-## データフロー
-1. 設定読み込みと検証
-2. Work Items 取得
-3. ステータス変更履歴取得
-4. `./data/` に JSON 保存（自動バックアップあり）
-5. `generate-work-table` で Markdown 出力
+## Data flow
+1. Load and validate configuration
+2. Fetch Work Items
+3. Fetch status history
+4. Save JSON under `./data/` (with automatic backup)
+5. Output markdown via `generate-work-table`
 
-## 必須/関連の環境変数
-必須:
+## Required/related environment variables
+Required:
 - `AZURE_DEVOPS_PAT`
 - `AZURE_DEVOPS_ORG`
 
-任意:
+Optional:
 - `AZURE_DEVOPS_PROJECT`
 - `API_VERSION` (default 7.2)
 - `LOG_LEVEL` (INFO|WARN|ERROR)
 - `RETRY_COUNT`, `RETRY_DELAY`, `REQUEST_TIMEOUT`, `BATCH_SIZE`
 
-## よく使うコマンド
+## Common commands
 ```bash
-# ヘルプ
+# Help
 ./ado-tracker.sh help
 
-# 接続テスト
+# Connection test
 ./ado-tracker.sh test-connection
 
-# 設定
+# Configuration
 ./ado-tracker.sh config show
 ./ado-tracker.sh config validate
 ./ado-tracker.sh config template
 
-# 取得（プロジェクト未指定時はAZURE_DEVOPS_PROJECTを使用）
+# Fetch (use AZURE_DEVOPS_PROJECT when project is not specified)
 ./ado-tracker.sh fetch ProjectName 30
 ./ado-tracker.sh fetch 30 --with-details
 ./ado-tracker.sh status-history
 ./ado-tracker.sh fetch-details
 
-# 作業記録テーブル生成
+# Generate work record table
 ./ado-tracker.sh generate-work-table 2025-01 ./work_records/2025-01.md
 ```
 
-## テスト
+## Tests
 ```bash
 ./tests/integration/test_main.sh
 ./tests/integration/test_work_table.sh
@@ -73,11 +73,11 @@
 ./tests/unit/test_data.sh
 ./tests/unit/test_output.sh
 ```
-※ テストはモック API を使用するため、実際の Azure DevOps 接続は不要です。
+Tests use a mock API, so a live Azure DevOps connection is not required.
 
-## 実行時の注意
-- すべてのシェルスクリプトは `set -euo pipefail` 前提
-- 取得データは `./data/backup/` に自動バックアップ
-- 中断復旧用のチェックポイント: `./data/checkpoint.json`
-- 取得データのタイムスタンプは JST 前提
-- PAT などの秘密情報はコミットしないこと（漏洩時は即ローテーション）
+## Runtime notes
+- All shell scripts assume `set -euo pipefail`
+- Fetched data is automatically backed up under `./data/backup/`
+- Checkpoint for resume: `./data/checkpoint.json`
+- Timestamps are based on JST
+- Do not commit secrets such as PATs (rotate immediately if leaked)

@@ -1,54 +1,54 @@
 # US-001 Implementation Tasks Overview
 
 ## User Story
-**Azure DevOpsからチケット履歴を抽出する**
+**Extract ticket history from Azure DevOps**
 
-As a システム I want Azure DevOps APIを使用してチケットのステータス変更履歴を取得する So that 開発者の作業実績を自動的に追跡できる
+As a system I want to fetch ticket status change history using the Azure DevOps API so that I can automatically track developer work records
 
 ## Task Decomposition Summary
 
 ### Backend Tasks (5 tasks)
-- `US-001-BE-001`: Azure DevOps API接続設定とPAT認証実装 ✅ **done**
-- `US-001-BE-002`: チケット一覧取得機能実装 ✅ **done**
-- `US-001-BE-003`: チケットステータス変更履歴取得機能実装 ✅ **done**
-- `US-001-BE-004`: チケット詳細情報取得機能実装 ✅ **done**
-- `US-001-BE-005`: エラーハンドリングとログ機能実装 ✅ **done**
+- `US-001-BE-001`: Implement Azure DevOps API connection settings and PAT auth ✅ **done**
+- `US-001-BE-002`: Implement ticket list fetch ✅ **done**
+- `US-001-BE-003`: Implement ticket status history fetch ✅ **done**
+- `US-001-BE-004`: Implement ticket details fetch ✅ **done**
+- `US-001-BE-005`: Implement error handling and logging ✅ **done**
 
 ### Infrastructure Tasks (3 tasks)
-- `US-001-INF-001`: シェルスクリプト基本構造作成 ✅ **done**
-- `US-001-INF-002`: データ保存用ディレクトリ構造とJSONファイル管理実装 ✅ **done**
-- `US-001-INF-003`: 設定管理と環境変数処理実装 ✅ **done**
+- `US-001-INF-001`: Create basic shell script structure ✅ **done**
+- `US-001-INF-002`: Implement data storage directories and JSON file management ✅ **done**
+- `US-001-INF-003`: Implement configuration management and environment variable handling ✅ **done**
 
 ### Frontend Tasks (1 task)
-- `US-001-FE-001`: コンソール出力フォーマット実装 ✅ **done**
+- `US-001-FE-001`: Implement console output formatting ✅ **done**
 
 ### Refactoring Tasks (1 task)
-- `US-001-RF-001`: コードベース構造とテストファイル整理リファクタリング ✅ **done**
+- `US-001-RF-001`: Refactor codebase structure and test file organization ✅ **done**
 
 ## Task Dependencies
 ```
-US-001-INF-001 (基本構造)
-├── US-001-INF-003 (設定管理)
-├── US-001-BE-001 (API接続)
-│   ├── US-001-BE-002 (チケット一覧)
-│   ├── US-001-BE-003 (履歴取得)
-│   └── US-001-BE-004 (詳細取得)
-├── US-001-BE-005 (エラーハンドリング)
-├── US-001-INF-002 (データ管理)
-├── US-001-FE-001 (出力)
-└── US-001-RF-001 (リファクタリング) ← 全タスク完了後に実施
+US-001-INF-001 (base structure)
+├── US-001-INF-003 (configuration management)
+├── US-001-BE-001 (API connection)
+│   ├── US-001-BE-002 (ticket list)
+│   ├── US-001-BE-003 (history fetch)
+│   └── US-001-BE-004 (details fetch)
+├── US-001-BE-005 (error handling)
+├── US-001-INF-002 (data management)
+├── US-001-FE-001 (output)
+└── US-001-RF-001 (refactoring) ← run after all tasks complete
 ```
 
 ## Estimated Timeline
-- **Total Effort**: 26-32 hours (リファクタリング含む)
-- **Task Size**: 2-3 hours per task (リファクタリングは8-12時間)
+- **Total Effort**: 26-32 hours (including refactoring)
+- **Task Size**: 2-3 hours per task (refactoring is 8-12 hours)
 - **Completion Target**: 4-5 days
 
 ## Acceptance Criteria Mapping
-- API接続 → US-001-BE-001
-- チケット一覧取得 → US-001-BE-002  
-- ステータス履歴取得 → US-001-BE-003
-- チケット詳細取得 → US-001-BE-004
-- エラー処理 → US-001-BE-005
-- データ保存 → US-001-INF-002
-- 95%精度 → 全タスク統合テスト
+- API connection → US-001-BE-001
+- Ticket list fetch → US-001-BE-002  
+- Status history fetch → US-001-BE-003
+- Ticket details fetch → US-001-BE-004
+- Error handling → US-001-BE-005
+- Data storage → US-001-INF-002
+- 95% accuracy → integrated testing across all tasks
