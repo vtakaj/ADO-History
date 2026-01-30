@@ -1,58 +1,58 @@
-# Azure DevOps 作業実績抽出ツール 要求仕様書
+# Azure DevOps Work Record Extraction Tool Requirements
 
-## 1. プロジェクト概要
+## 1. Project overview
 
-### 1.1 プロジェクト名
-締結品脱落監視システム開発サポート
+### 1.1 Project name
+Fastener Drop Monitoring System Development Support
 
-### 1.2 目的
-Azure DevOps の Work Item とステータス履歴から、日ごと・人ごとの作業内容（チケット番号）を自動的に抽出し、月次の作業記録テーブル（Markdown）を生成する。手動での実績集計を削減し、進捗把握を効率化する。
+### 1.2 Purpose
+Automatically extract daily and per-assignee work content (ticket numbers) from Azure DevOps Work Items and status history, and generate a monthly work record table (Markdown). Reduce manual aggregation and improve progress tracking.
 
-## 2. 業務要件
+## 2. Business requirements
 
-### 2.1 必須機能
-- Azure DevOps REST API から Work Item とステータス変更履歴を取得
-- 取得データを JSON として `./data/` に保存
-- 月次の作業記録テーブル（Markdown）を生成
-- 担当者をコマンドまたは `.env` の設定で絞り込み可能
+### 2.1 Required features
+- Fetch Work Items and status change history from the Azure DevOps REST API
+- Save fetched data as JSON under `./data/`
+- Generate a monthly work record table (Markdown)
+- Allow filtering by assignee via command or `.env` settings
 
-### 2.2 取得データ
-- Work Items: ID / タイトル / 担当者 / ステータス / 最終更新日
-- ステータス変更履歴: 変更日 / 変更者 / 担当者 / 変更前後ステータス
+### 2.2 Data to collect
+- Work Items: ID / title / assignee / status / last updated date
+- Status history: change date / changed by / assignee / before and after status
 
-## 3. 非機能要件
+## 3. Non-functional requirements
 
-### 3.1 実行環境
-- bash / curl / jq が利用可能な環境
-- Azure DevOps へのネットワークアクセス
+### 3.1 Runtime environment
+- Environment with bash / curl / jq available
+- Network access to Azure DevOps
 
-### 3.2 セキュリティ
-- PAT は環境変数で管理（`.env` で管理する場合はコミットしない）
-- `.env` の推奨権限は 600
+### 3.2 Security
+- Manage PAT via environment variables (do not commit if managed via `.env`)
+- Recommended permissions for `.env` are 600
 
-### 3.3 運用
-- 取得データは `./data/backup/` に自動バックアップ
-- 中断復旧用のチェックポイントを `./data/checkpoint.json` に保存
-- 取得データのタイムスタンプは JST 前提
+### 3.3 Operations
+- Fetched data is automatically backed up under `./data/backup/`
+- Save checkpoints for recovery to `./data/checkpoint.json`
+- Timestamps are based on JST
 
-## 4. 出力例
+## 4. Output example
 
-### 4.1 作業記録テーブル（Markdown）
+### 4.1 Work record table (Markdown)
 ```
-# 作業記録テーブル (2025-12)
+# Work Record Table (2025-12)
 
-| 日付 | 曜日 | 原口 俊樹 | 作業内容 | 小田 匠 | 作業内容 |
-|------|------|-----------|----------|---------|----------|
-| 2025/12/01 | 月 | #5433 #5421 | | #5447 | |
-| 2025/12/02 | 火 | #5433 | | #5447 #5448 | |
-| **合計** | | **--:--** | | **--:--** | |
+| Date | Day | Toshiki Haraguchi | Work | Takumi Oda | Work |
+|------|-----|-------------------|------|------------|------|
+| 2025/12/01 | Mon | #5433 #5421 | | #5447 | |
+| 2025/12/02 | Tue | #5433 | | #5447 #5448 | |
+| **Total** | | **--:--** | | **--:--** | |
 
-## 対応チケット一覧 (2025年12月)
-- **#5433**: 変位演算部 ドメイン モデリング
-- **#5447**: 【ODC改善】不具合の影響度に応じた対応期限を定義し、起票時に影響度を必須入力にする
+## Ticket List (December 2025)
+- **#5433**: Displacement Calculation Domain Modeling
+- **#5447**: [ODC Improvement] Define response deadlines based on defect impact and require impact entry at creation
 ```
 
-## 5. 制約事項
-- Azure DevOps の PAT と組織情報が必要
-- ステータス履歴が正しく記録されていることが前提
-- 出力形式は Markdown のみ
+## 5. Constraints
+- Azure DevOps PAT and organization information are required
+- Assumes status history is recorded correctly
+- Output format is Markdown only

@@ -1,32 +1,32 @@
-# ユーザーストーリー一覧
+# User Story List
 
-## 概要
-このドキュメントは、Azure DevOps作業実績抽出ツールのユーザーストーリー一覧です。
-PoC（概念実証）段階のミニマム機能に焦点を絞って整理されています。
+## Overview
+This document lists the user stories for the Azure DevOps work record extraction tool.
+It focuses on the minimum features for the PoC (proof of concept) phase.
 
-## ストーリー一覧
+## Story list
 
-### PoC段階のストーリー（ミニマム機能）
+### PoC phase stories (minimum features)
 
-| ID | タイトル | 優先度 | 説明 | 状況 |
+| ID | Title | Priority | Description | Status |
 |---|---|---|---|---|
-| [US-001](./US-001.md) | Azure DevOpsからチケット履歴を抽出する | 高 | Azure DevOps APIを使用してチケットのステータス変更履歴を自動取得する | 実装済み |
-| [US-002](./US-002.md) | 作業期間を計算する | 高 | Doing開始からDone完了までの期間を計算し、Blocked期間を除外する | 未実装 |
-| [US-003](./US-003.md) | チームの月次作業サマリーを確認する | 高 | チーム全体の月間作業時間と成果を確認できる | 未実装 |
-| [US-004](./US-004.md) | 月次作業サマリーを自動生成する | 高 | 月末に自動的に月次サマリーレポートを生成する | 未実装 |
-| [US-005](./US-005.md) | チーム作業レポートをエクスポートする | 高 | チーム全体の月次作業レポートを複数の形式（JSON、Markdown、Excel）でエクスポートできる | 未実装 |
+| [US-001](./US-001.md) | Extract ticket history from Azure DevOps | High | Automatically fetch ticket status change history using the Azure DevOps API | Implemented |
+| [US-002](./US-002.md) | Calculate work periods | High | Calculate the period from Doing start to Done completion and exclude Blocked periods | Not implemented |
+| [US-003](./US-003.md) | Review team monthly work summary | High | View monthly work time and outcomes for the whole team | Not implemented |
+| [US-004](./US-004.md) | Automatically generate monthly work summary | High | Generate a monthly summary report automatically at the end of the month | Not implemented |
+| [US-005](./US-005.md) | Export team work reports | High | Export the team's monthly work report in multiple formats (JSON, Markdown, Excel) | Not implemented |
 
-## 実装優先順位
+## Implementation priority
 
-### PoC段階（全体）
-1. US-001: Azure DevOpsからチケット履歴を抽出する
-2. US-002: 作業期間を計算する
-3. US-003: チームの月次作業サマリーを確認する
-4. US-004: 月次作業サマリーを自動生成する
-5. US-005: チーム作業レポートをエクスポートする
+### PoC phase (overall)
+1. US-001: Extract ticket history from Azure DevOps
+2. US-002: Calculate work periods
+3. US-003: Review team monthly work summary
+4. US-004: Automatically generate monthly work summary
+5. US-005: Export team work reports
 
-## 技術要件
-- オープンソース技術を活用
-- 2週間以内でのプロトタイプ開発・デプロイ
-- 低コスト開発
-- 実際のAzure DevOpsリポジトリでの動作確認
+## Technical requirements
+- Use open source technologies
+- Develop and deploy the prototype within 2 weeks
+- Low-cost development
+- Verify operation on a real Azure DevOps repository

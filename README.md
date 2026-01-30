@@ -1,51 +1,51 @@
 # ADO-History
 
-Azure DevOpsからチケット履歴を抽出するツール
+A tool that extracts ticket history from Azure DevOps.
 
-## 設定管理
+## Configuration
 
-Azure DevOps Tracker を使用する前に、接続設定を行います。
+Configure the connection before using Azure DevOps Tracker.
 
-### セキュリティ（APIキー）
+### Security (API key)
 
-誤ってAPIキーをコミットしてしまった場合は、すぐに**無効化（ローテーション）**してください。
+If you accidentally commit an API key, revoke/rotate it immediately.
 
-最低限の対応手順:
-1. OpenAI のダッシュボードで該当キーを**無効化**（Revoke/Rotate）
-2. リポジトリから**平文キーを削除**（ファイル削除 or 置き換え）
-3. 既にリモートへpush済みなら、**履歴からも削除**（BFG/フィルタでの除去）
-4. 新しいキーを作成し、環境変数で管理（`OPENAI_API_KEY` など）
+Minimum response steps:
+1. Revoke/rotate the key in the OpenAI dashboard
+2. Remove the plain text key from the repository (delete or replace the file)
+3. If already pushed, remove it from history as well (BFG/filter)
+4. Create a new key and manage it via environment variables (such as `OPENAI_API_KEY`)
 
-※ 鍵の漏洩が疑われる場合は、優先度高で対応してください。
+If a leak is suspected, treat it as high priority.
 
-### 設定テンプレート生成
+### Generate configuration template
 
 ```bash
-# 設定テンプレートを生成
+# Generate a configuration template
 ./ado-tracker.sh config template
 
-# .env.template を .env にコピーして編集
+# Copy .env.template to .env and edit
 cp .env.template .env
-# .env ファイルに必要な値を設定
+# Set required values in .env
 
-# 設定を確認
+# Show configuration
 ./ado-tracker.sh config show
 
-# 設定を検証
+# Validate configuration
 ./ado-tracker.sh config validate
 ```
 
-### Codex 認証方法
+### Codex authentication
 
-Codex CLI と VS Code 拡張は、以下のどちらかで認証します。
+Codex CLI and the VS Code extension authenticate using one of the following methods.
 
-1) ChatGPT サインイン（推奨）
-- `codex --login` を実行してサインイン
-- 認証情報はユーザーディレクトリに保存されます（devcontainer では `~/.codex` をマウント推奨）
+1) ChatGPT sign-in (recommended)
+- Run `codex --login` to sign in
+- Credentials are saved in the user directory (for devcontainer, mount `~/.codex`)
 
-2) APIキー
-- 環境変数 `OPENAI_API_KEY` を設定
-- devcontainer 利用時は、`devcontainer.json` の `remoteEnv` でホスト環境変数を引き継ぐと便利です
+2) API key
+- Set the `OPENAI_API_KEY` environment variable
+- When using a devcontainer, it is convenient to pass host environment variables via `remoteEnv` in `devcontainer.json`
 
 ```json
 "remoteEnv": {
@@ -53,305 +53,305 @@ Codex CLI と VS Code 拡張は、以下のどちらかで認証します。
 }
 ```
 
-### 環境変数
+### Environment variables
 
-以下の環境変数が必要です：
+The following environment variables are required:
 
-#### 必須設定
-- `AZURE_DEVOPS_PAT`: Personal Access Token（必須）
-- `AZURE_DEVOPS_ORG`: 組織名（必須）
-- `AZURE_DEVOPS_PROJECT`: デフォルトプロジェクト名（fetch コマンドで使用）
+#### Required
+- `AZURE_DEVOPS_PAT`: Personal Access Token (required)
+- `AZURE_DEVOPS_ORG`: Organization name (required)
+- `AZURE_DEVOPS_PROJECT`: Default project name (used by the fetch command)
 
-#### オプション設定
-- `API_VERSION`: Azure DevOps API バージョン（デフォルト: 7.2）
-- `LOG_LEVEL`: ログレベル - INFO|WARN|ERROR（デフォルト: INFO）
-- `RETRY_COUNT`: API呼び出しリトライ回数（デフォルト: 3）
-- `RETRY_DELAY`: リトライ間隔（秒）（デフォルト: 1）
-- `REQUEST_TIMEOUT`: APIリクエストタイムアウト（秒）（デフォルト: 30）
-- `BATCH_SIZE`: バッチ処理サイズ（デフォルト: 50）
+#### Optional
+- `API_VERSION`: Azure DevOps API version (default: 7.2)
+- `LOG_LEVEL`: log level - INFO|WARN|ERROR (default: INFO)
+- `RETRY_COUNT`: API retry count (default: 3)
+- `RETRY_DELAY`: retry interval in seconds (default: 1)
+- `REQUEST_TIMEOUT`: API request timeout in seconds (default: 30)
+- `BATCH_SIZE`: batch size (default: 50)
 
-## エラーハンドリングとログ機能（US-001-BE-005）
+## Error handling and logging (US-001-BE-005)
 
-### 強化されたエラーハンドリング
+### Enhanced error handling
 
-Azure DevOps API呼び出し時の各種エラーに対して詳細な対処法を提供：
+Provide detailed guidance for errors when calling the Azure DevOps API:
 
-- **401 認証エラー**: PAT有効期限、アクセス権限、組織名の確認を提案
-- **403 権限エラー**: PAT権限設定、プロジェクト参加状況の確認を提案
-- **404 リソースエラー**: プロジェクト名、組織名、Work Item IDの確認を提案
-- **429 レート制限**: Retry-Afterヘッダーを解析して適切な待機時間を設定
-- **5xx サーバーエラー**: Azure DevOpsサービス状況の確認と再実行を提案
-- **ネットワークエラー**: 接続状況、プロキシ設定、タイムアウト値の調整を提案
+- **401 Auth error**: suggest checking PAT expiry, permissions, and org name
+- **403 Permission error**: suggest checking PAT scopes and project membership
+- **404 Resource error**: suggest checking project name, org name, and Work Item ID
+- **429 Rate limit**: parse the Retry-After header and set an appropriate wait time
+- **5xx Server error**: suggest checking Azure DevOps service status and retrying
+- **Network error**: suggest checking connectivity, proxy settings, and timeouts
 
-### 指数バックオフリトライ機能
+### Exponential backoff retry
 
-- 初期遅延時間から開始し、失敗するたびに遅延時間を2倍に増加
-- 最大遅延時間（300秒）に達するまで継続
-- レート制限時はRetry-Afterヘッダーを優先して使用
+- Start from the initial delay and double it on each failure
+- Continue until the max delay (300 seconds) is reached
+- For rate limits, prefer the Retry-After header
 
-### チェックポイント機能
+### Checkpoint recovery
 
-処理中断時の復旧機能：
+Recovery after interruption:
 
 ```bash
-# 処理中断後、同一コマンドを再実行すると自動復旧
+# After interruption, rerun the same command for automatic recovery
 ./ado-tracker.sh fetch MyProject 30
 
-# チェックポイントファイルの場所
+# Checkpoint file location
 ./data/checkpoint.json
 ```
 
-### タイムスタンプ付きログ
+### Timestamped logs
 
-すべてのログメッセージにタイムスタンプが付与：
+All log messages include timestamps:
 
 ```
-[2025-07-25 01:30:00] [INFO] API呼び出し: GET https://dev.azure.com/org/project/_apis/wit/workitems
-[2025-07-25 01:30:01] [WARN] レート制限: 60秒後にリトライします (HTTP 429)
-[2025-07-25 01:30:02] [ERROR] 認証エラー: PATを確認してください
+[2025-07-25 01:30:00] [INFO] API request: GET https://dev.azure.com/org/project/_apis/wit/workitems
+[2025-07-25 01:30:01] [WARN] Rate limit: retry in 60 seconds (HTTP 429)
+[2025-07-25 01:30:02] [ERROR] Auth error: please check your PAT
 ```
 
-## 基本的な使用方法
+## Basic usage
 
 ```bash
-# ヘルプを表示
+# Show help
 ./ado-tracker.sh help
 
-# API接続テスト
-./ado-tracker.sh test-connection   # Azure DevOps API接続テスト
+# API connection test
+./ado-tracker.sh test-connection   # Azure DevOps API connection test
 
-# 設定管理
-./ado-tracker.sh config show      # 設定表示
-./ado-tracker.sh config validate  # 設定検証
-./ado-tracker.sh config template  # テンプレート生成
+# Configuration
+./ado-tracker.sh config show      # Show configuration
+./ado-tracker.sh config validate  # Validate configuration
+./ado-tracker.sh config template  # Generate template
 
-# チケット履歴を取得（AZURE_DEVOPS_PROJECT に設定されたデフォルトプロジェクトを使用）
-./ado-tracker.sh fetch 30              # デフォルトプロジェクトで過去30日間を取得
+# Fetch ticket history (uses default project in AZURE_DEVOPS_PROJECT)
+./ado-tracker.sh fetch 30                 # Fetch last 30 days for default project
 
-# 詳細情報も含めて取得（デフォルトプロジェクト）
-./ado-tracker.sh fetch 30 --with-details  # 詳細情報も含めて包括的に取得
+# Fetch with details (default project)
+./ado-tracker.sh fetch 30 --with-details  # Fetch with additional details
 
-# ステータス変更履歴のみを取得
-./ado-tracker.sh status-history ProjectName  # 既存Work Itemsのステータス変更履歴を取得
-./ado-tracker.sh status-history              # 既定プロジェクトで取得
+# Fetch only status history
+./ado-tracker.sh status-history ProjectName  # Fetch status history for existing Work Items
+./ado-tracker.sh status-history              # Fetch using the default project
 
-# Work Item詳細情報のみを取得
-./ado-tracker.sh fetch-details ProjectName  # 既存Work Itemsの詳細情報を取得
-./ado-tracker.sh fetch-details              # 既定プロジェクトで取得
+# Fetch only Work Item details
+./ado-tracker.sh fetch-details ProjectName  # Fetch details for existing Work Items
+./ado-tracker.sh fetch-details              # Fetch using the default project
 
-# 作業記録テーブル生成（マークダウン）
-./ado-tracker.sh generate-work-table 2025-01 ./work_records/2025-01.md  # 月次作業記録テーブル生成
+# Generate work record table (markdown)
+./ado-tracker.sh generate-work-table 2025-01 ./work_records/2025-01.md  # Monthly work table
 ```
 
-## テスト
+## Tests
 
 ```bash
-# 結合テスト
+# Integration tests
 ./tests/integration/test_main.sh
 ./tests/integration/test_work_table.sh
 ./tests/integration/test_error_scenarios.sh
 ./tests/integration/test_fetch_flow.sh
 
-# 単体テスト
+# Unit tests
 ./tests/unit/test_api.sh
 ./tests/unit/test_config.sh
 ./tests/unit/test_data.sh
 ./tests/unit/test_output.sh
 ```
 
-※ テストはモック API を使用するため、実際の Azure DevOps 接続は不要です。
+Tests use a mock API, so a live Azure DevOps connection is not required.
 
-## 機能詳細
+## Feature details
 
-### Work Items取得 (fetch)
+### Work Items fetch (fetch)
 
-指定されたプロジェクトのWork Items（チケット）とステータス変更履歴を取得し、JSON形式でローカルに保存します。
+Fetch Work Items (tickets) and status history for the specified project, and save them locally as JSON.
 
-#### 基本動作
-通常のfetchコマンドでは以下の情報を取得します：
-- **基本情報**: チケット番号（ID）、タイトル、担当者、現在のステータス、最終更新日時
-- **ステータス履歴**: 各チケットのステータス変更履歴
+#### Basic behavior
+The standard fetch command retrieves the following:
+- **Basic info**: ticket ID, title, assignee, current status, last updated time
+- **Status history**: status change history for each ticket
 
-#### 詳細情報オプション
-`--with-details` オプションを指定すると、追加で詳細情報も取得されます：
-- **詳細情報**: チケット種別、優先度、作成日時、見積もり時間、説明等
+#### Details option
+With the `--with-details` option, additional details are fetched:
+- **Details**: ticket type, priority, created time, estimated time, description, etc.
 
-#### データ保存
-- 基本情報: `./data/workitems.json`
-- ステータス履歴: `./data/status_history.json`
-- 詳細情報: `./data/workitem_details.json`（--with-detailsオプション使用時のみ）
-- 既存データは `./data/backup/` に自動バックアップされます
-- ページネーション対応で大量データも処理可能
+#### Data storage
+- Basic info: `./data/workitems.json`
+- Status history: `./data/status_history.json`
+- Details: `./data/workitem_details.json` (only when using `--with-details`)
+- Existing data is backed up automatically under `./data/backup/`
+- Supports pagination to handle large datasets
 
-#### 使用例
+#### Examples
 ```bash
-# デフォルトプロジェクトの過去30日間の基本データを取得
+# Fetch basic data for the last 30 days in the default project
 ./ado-tracker.sh fetch 30
 
-# 詳細情報も含めて包括的に取得
+# Fetch with additional details
 ./ado-tracker.sh fetch 30 --with-details
 
-# 過去7日間の基本データを取得
+# Fetch basic data for the last 7 days
 ./ado-tracker.sh fetch 7
 ```
 
-### ステータス変更履歴取得 (status-history)
+### Status history (status-history)
 
-各Work Itemのステータス変更履歴を取得し、日本時間で記録します。
+Fetch status change history for each Work Item and record it in JST.
 
-#### 取得される情報
+#### Data collected
 - Work Item ID
-- 変更日時（日本時間 JST）
-- 変更者情報
-- 変更前ステータス
-- 変更後ステータス
-- リビジョン番号
+- Change time (JST)
+- Changed by
+- Status before change
+- Status after change
+- Revision number
 
-#### データ保存
-- 取得されたデータは `./data/status_history.json` に保存されます
-- 既存データは `./data/backup/` に自動バックアップされます
-- 変更日時順でソートされます
+#### Data storage
+- Saved to `./data/status_history.json`
+- Existing data is backed up automatically under `./data/backup/`
+- Sorted by change time
 
-#### 使用例
+#### Examples
 ```bash
-# デフォルトプロジェクトのステータス変更履歴を取得
+# Fetch status history for the default project
 ./ado-tracker.sh status-history
 
-# fetchコマンドでは自動的にステータス履歴も同時取得されます
+# The fetch command also retrieves status history automatically
 ./ado-tracker.sh fetch 30
 ```
 
-### Work Item詳細情報取得 (fetch-details)
+### Work Item details (fetch-details)
 
-各Work Itemの詳細情報を取得し、日本時間で記録します。既存のworkitems.jsonが必要です。
+Fetch details for each Work Item and record them in JST. This requires existing `workitems.json`.
 
-#### 取得される情報
+#### Data collected
 - Work Item ID
-- チケットタイトル
-- チケットタイプ（User Story、Bug、Task等）
-- 優先度
-- 作成日時（日本時間 JST）
-- 最終更新日時（日本時間 JST）
-- 見積もり時間（原始見積）
-- 担当者
-- 現在のステータス
-- 説明（オプション）
+- Ticket title
+- Ticket type (User Story, Bug, Task, etc.)
+- Priority
+- Created time (JST)
+- Last updated time (JST)
+- Original estimate
+- Assignee
+- Current status
+- Description (optional)
 
-#### データ保存
-- 取得されたデータは `./data/workitem_details.json` に保存されます
-- 既存データは `./data/backup/` に自動バックアップされます
-- バッチ処理による高速取得
+#### Data storage
+- Saved to `./data/workitem_details.json`
+- Existing data is backed up automatically under `./data/backup/`
+- Fast retrieval via batch processing
 
-#### 使用例
+#### Examples
 ```bash
-# デフォルトプロジェクトのWork Item詳細情報を取得
+# Fetch Work Item details for the default project
 ./ado-tracker.sh fetch-details
 
-# fetchコマンドで詳細情報を含めて取得するには --with-details オプションを使用
+# Use --with-details on fetch to include details
 ./ado-tracker.sh fetch 30 --with-details
 ```
 
-### 作業記録テーブル生成 (generate-work-table)
+### Generate work table (generate-work-table)
 
-取得済みのチケット情報とステータス履歴から、作業記録用のマークダウンテーブルを生成します。
+Generate a markdown work record table from fetched ticket data and status history.
 
-#### 機能
+#### Features
 
-- **月次テーブル**: 指定月の日次作業記録テーブル
-- **担当者別列**: ステータス履歴から担当者を自動検出・列生成
-- **チケット番号表示**: Doing→Done期間中にチケット番号を自動表示
-- **Blocked制御**: Blocked状態時の表示制御（翌日から非表示、解除時に再表示）
-- **手入力対応**: 作業時間は後から手入力用（h:mm形式）
-- **月間合計**: フッターに月間トータル時間表示欄
-- **チケットリスト**: 月単位の対応チケット番号・タイトル一覧
+- **Monthly table**: daily work record table for the specified month
+- **Assignee columns**: auto-detect assignees from status history and create columns
+- **Ticket ID display**: show ticket IDs during Doing to Done window
+- **Blocked handling**: hide while Blocked (hidden the next day, reappears when unblocked)
+- **Manual entry**: work time is entered manually later (h:mm)
+- **Monthly totals**: footer includes monthly total time
+- **Ticket list**: list of ticket IDs and titles for the month
 
-#### 出力形式
+#### Output format
 
 ```markdown
-# 作業記録テーブル (2025-01)
+# Work Record Table (2025-01)
 
-| 日付 | 曜日 | 田中太郎 | 作業内容 | 佐藤花子 | 作業内容 |
-|------|------|---------|----------|---------|----------|
-| 2025/01/10 | 金 | | 12345 | | |
-| 2025/01/12 | 日 | | | | 12346 |
-| **合計** | | **--:--** | | **--:--** | |
+| Date | Day | Taro Tanaka | Work | Hanako Sato | Work |
+|------|-----|------------|------|------------|------|
+| 2025/01/10 | Fri | | 12345 | | |
+| 2025/01/12 | Sun | | | | 12346 |
+| **Total** | | **--:--** | | **--:--** | |
 
-## 対応チケット一覧 (2025年01月)
+## Ticket List (January 2025)
 
 - **12345**: Implement user authentication feature
 - **12346**: Fix login validation bug
 ```
 
-#### 使用例
+#### Examples
 
 ```bash
-# 2025年1月の作業記録テーブルを生成
+# Generate the work record table for January 2025
 ./ado-tracker.sh generate-work-table 2025-01 ./work_records/2025-01.md
 
-# 2025年2月の作業記録テーブルを生成
+# Generate the work record table for February 2025
 ./ado-tracker.sh generate-work-table 2025-02 ./work_records/2025-02.md
 ```
 
-## プロジェクト構造
+## Project structure
 
-リファクタリング後の整理されたプロジェクト構造：
+Organized project structure after refactoring:
 
 ```
 ado-history/
-├── ado-tracker.sh          # メインスクリプト（軽量化：106行）
-├── lib/                    # モジュールライブラリ
-│   ├── core/              # コア機能
-│   │   ├── api_client.sh  # Azure DevOps API クライアント
-│   │   ├── config_manager.sh # 設定管理
-│   │   ├── data_processor.sh # データ処理・変換
-│   │   └── logger.sh      # ログ機能
-│   ├── commands/          # コマンド実装
-│   │   ├── fetch.sh       # fetchコマンド実装
-│   │   ├── generate_table.sh # テーブル生成実装
-│   │   └── test_connection.sh # 接続テスト実装
-│   ├── formatters/        # 出力フォーマット
-│   │   ├── markdown.sh    # マークダウン出力
-│   │   └── display.sh     # 表示・UI機能
-│   └── utils/             # ユーティリティ
-│       ├── date_utils.sh  # 日付処理
-│       ├── string_utils.sh # 文字列処理
-│       ├── file_utils.sh  # ファイル処理
-│       └── validation.sh  # バリデーション
-├── tests/                 # テストスイート
-│   ├── unit/             # 単体テスト
-│   ├── integration/      # 結合テスト
-│   ├── helpers/          # テストヘルパー
-│   └── fixtures/         # テストデータ
-├── data/                 # データファイル
-└── work_records/         # 生成される作業記録
+├── ado-tracker.sh          # Main script (lightweight: 106 lines)
+├── lib/                    # Module library
+│   ├── core/              # Core functions
+│   │   ├── api_client.sh  # Azure DevOps API client
+│   │   ├── config_manager.sh # Configuration management
+│   │   ├── data_processor.sh # Data processing and transformation
+│   │   └── logger.sh      # Logging
+│   ├── commands/          # Command implementations
+│   │   ├── fetch.sh       # fetch command implementation
+│   │   ├── generate_table.sh # Table generation implementation
+│   │   └── test_connection.sh # Connection test implementation
+│   ├── formatters/        # Output formatting
+│   │   ├── markdown.sh    # Markdown output
+│   │   └── display.sh     # Display/UI
+│   └── utils/             # Utilities
+│       ├── date_utils.sh  # Date handling
+│       ├── string_utils.sh # String handling
+│       ├── file_utils.sh  # File handling
+│       └── validation.sh  # Validation
+├── tests/                 # Test suite
+│   ├── unit/             # Unit tests
+│   ├── integration/      # Integration tests
+│   ├── helpers/          # Test helpers
+│   └── fixtures/         # Test data
+├── data/                 # Data files
+└── work_records/         # Generated work records
 ```
 
-## テスト実行
+## Test execution
 
-新しい構造化されたテスト：
+Structured tests:
 
 ```bash
-# メイン機能統合テスト
+# Main feature integration test
 ./tests/integration/test_main.sh
 
-# 作業テーブル生成テスト
+# Work table generation test
 ./tests/integration/test_work_table.sh
 
-# エラーシナリオテスト
+# Error scenario test
 ./tests/integration/test_error_scenarios.sh
 
-# fetch機能フロー統合テスト
+# Fetch flow integration test
 ./tests/integration/test_fetch_flow.sh
 
-# API単体テスト
+# API unit test
 ./tests/unit/test_api.sh
 
-# 設定管理単体テスト
+# Configuration unit test
 ./tests/unit/test_config.sh
 
-# データ処理単体テスト
+# Data processing unit test
 ./tests/unit/test_data.sh
 
-# 出力フォーマット単体テスト
+# Output formatting unit test
 ./tests/unit/test_output.sh
 ```
