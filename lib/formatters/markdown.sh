@@ -44,8 +44,8 @@ generate_table_row() {
         active_tickets=$(get_active_tickets_for_assignee_on_date "$assignee" "$date")
         
         if [[ -n "$active_tickets" ]]; then
-            # チケット番号に#を付けて表示
-            work_content=$(echo "$active_tickets" | sed 's/\([0-9]\+\)/#\1/g')
+            # チケット番号に#を付けて表示（BSD/GNU両対応）
+            work_content=$(echo "$active_tickets" | sed 's/[0-9][0-9]*/#&/g')
         fi
         
         echo -n " | $work_content |"

@@ -372,6 +372,14 @@ test_full_work_table_generation() {
                 log_error "Work table missing ticket list"
                 return 1
             fi
+
+            # Check for hash-prefixed ticket IDs in table rows
+            if echo "$content" | grep -q "| 2025/01/10 | .*#12345"; then
+                log_success "Work table rows include hash-prefixed ticket IDs"
+            else
+                log_error "Work table rows missing hash-prefixed ticket IDs"
+                return 1
+            fi
             
             # Check for month entries (should have 31 days in January)
             local day_count
